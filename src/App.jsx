@@ -7,21 +7,31 @@ import Messenger from "./pages/Messenger";
 import Friends from "./pages/Friends";
 import { autoReplies, initialDialogs, initialPosts, people } from "./data";
 import EditProfile from "./pages/EditProfile";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { nowTime } from "./utils";
 
-const readTheme = () => {
-  try {
-    return localStorage.getItem("theme") || "light";
-  } catch {
-    return "light";
-  }
-};
+// Тему до отрисовки уже поставил скрипт в index.html (с учётом системной)
+const readTheme = () => document.documentElement.dataset.theme || "light";
 
 const VIEWS = ["feed", "profile", "edit", "messages", "friends"];
 const readView = () => {
   const hash = window.location.hash.slice(1);
   return VIEWS.includes(hash) ? hash : "feed";
 };
+
+function PageError({ onRetry }) {
+  return (
+    <div className="card error-screen" role="alert">
+      <div className="error-screen__title">Не удалось показать страницу</div>
+      <p className="error-screen__text">
+        Произошла ошибка. Попробуйте ещё раз или откройте другой раздел в меню слева.
+      </p>
+      <button className="btn" onClick={onRetry}>
+        Попробовать снова
+      </button>
+    </div>
+  );
+}
 
 export default function App() {
   const [view, setView] = useState(readView);
@@ -159,24 +169,26 @@ export default function App() {
           unreadMessages={unreadMessages}
         />
         <main className="main">
-          {view === "feed" && <Feed posts={posts} postActions={postActions} />}
-          {view === "profile" && (
-            <Profile
-              posts={posts}
-              postActions={postActions}
-              onNavigate={navigate}
-            />
-          )}
-          {view === "edit" && <EditProfile onNavigate={navigate} />}
-          {view === "messages" && (
-            <Messenger
-              dialogs={dialogs}
-              activeId={activeDialogId}
-              onOpen={openDialog}
-              onSend={sendMessage}
-            />
-          )}
-          {view === "friends" && <Friends onMessage={messageFriend} />}
+          <ErrorBoundary key={view} fallback={(reset) => <PageError onRetry={reset} />}>
+            {view === "feed" && <Feed posts={posts} postActions={postActions} />}
+            {view === "profile" && (
+              <Profile
+                posts={posts}
+                postActions={postActions}
+                onNavigate={navigate}
+              />
+            )}
+            {view === "edit" && <EditProfile onNavigate={navigate} />}
+            {view === "messages" && (
+              <Messenger
+                dialogs={dialogs}
+                activeId={activeDialogId}
+                onOpen={openDialog}
+                onSend={sendMessage}
+              />
+            )}
+            {view === "friends" && <Friends onMessage={messageFriend} />}
+          </ErrorBoundary>
         </main>
       </div>
     </>

@@ -14,7 +14,7 @@ export default function VideoTab({ videos, onChange }) {
   const add = (files) => {
     const list = [...files].filter((f) => f.type.startsWith("video/"));
     if (!list.length) {
-      showSnackbar("Выберите видеофайл: MP4, MOV или WEBM");
+      showSnackbar("Выберите видеофайл: MP4, MOV или WEBM", "error");
       return;
     }
     onChange((prev) => [

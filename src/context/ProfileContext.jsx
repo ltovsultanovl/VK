@@ -1,6 +1,8 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { defaultProfile } from "../data";
 import { fullName } from "../profile";
+import { useSnackbar } from "../components/Snackbar";
+import { STORAGE_FULL_MESSAGE } from "../hooks";
 
 const STORAGE_KEY = "profile";
 const ProfileContext = createContext(null);
@@ -25,14 +27,18 @@ const readProfile = () => {
 
 export function ProfileProvider({ children }) {
   const [profile, setProfile] = useState(readProfile);
+  const showSnackbar = useSnackbar();
+  const failedRef = useRef(false);
 
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+      failedRef.current = false;
     } catch {
-      /* переполнение хранилища — профиль живёт до перезагрузки */
+      if (!failedRef.current) showSnackbar(STORAGE_FULL_MESSAGE, "error");
+      failedRef.current = true;
     }
-  }, [profile]);
+  }, [profile, showSnackbar]);
 
   const value = useMemo(
     () => ({

@@ -103,7 +103,7 @@ function Comment({ comment, onReply }) {
     <div className="comment">
       <Avatar name={author.name} color={author.color} src={author.src} size={32} />
       <div className="comment__body">
-        <a href="#" className="comment__name">{author.name}</a>
+        <span className="comment__name">{author.name}</span>
         <div className="comment__text">{comment.text}</div>
         <div className="comment__meta">
           <span>сегодня в {comment.time}</span>
@@ -167,7 +167,7 @@ export default function Post({ post, onLike, onShare, onComment, onPin, onDelete
       <header className="post__head">
         <Avatar name={author.name} color={author.color} src={author.src} size={40} />
         <div className="post__head-text">
-          <a href="#" className="post__author">{author.name}</a>
+          <span className="post__author">{author.name}</span>
           <div className="post__time">
             {post.pinned && (
               <span className="post__pinned">

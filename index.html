@@ -4,6 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Сеть — социальная сеть</title>
+  <script>
+    // Тему ставим до загрузки React, чтобы тёмная тема не мигала светлой.
+    // Сохранённое значение — JSON ("dark"), у старых сохранений — просто dark
+    {
+      let saved = null;
+      try {
+        const raw = localStorage.getItem("theme");
+        saved = raw && raw.startsWith('"') ? JSON.parse(raw) : raw;
+      } catch {}
+      const prefersDark = matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.dataset.theme = saved || (prefersDark ? "dark" : "light");
+    }
+  </script>
 </head>
 <body>
   <div id="root"></div>

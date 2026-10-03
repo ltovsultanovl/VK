@@ -37,6 +37,8 @@ const groups = [
   ],
 ];
 
+const FOOTER_LINKS = ["Блог", "Разработчикам", "Для бизнеса", "Ещё"];
+
 export default function Sidebar({ view, onNavigate, unreadMessages }) {
   // Редактирование профиля — подраздел профиля
   const activeView = view === "edit" ? "profile" : view;
@@ -72,10 +74,11 @@ export default function Sidebar({ view, onNavigate, unreadMessages }) {
         </div>
       ))}
       <div className="sidebar__footer">
-        <a href="#">Блог</a>
-        <a href="#">Разработчикам</a>
-        <a href="#">Для бизнеса</a>
-        <a href="#">Ещё</a>
+        {FOOTER_LINKS.map((label) => (
+          <a key={label} href="#" onClick={(e) => e.preventDefault()}>
+            {label}
+          </a>
+        ))}
       </div>
     </nav>
   );

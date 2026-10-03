@@ -20,7 +20,7 @@ export default function MusicTab({ tracks, onChange }) {
   const add = (files) => {
     const audio = [...files].filter((f) => f.type.startsWith("audio/"));
     if (!audio.length) {
-      showSnackbar("Выберите аудиофайл: MP3, M4A, OGG или WAV");
+      showSnackbar("Выберите аудиофайл: MP3, M4A, OGG или WAV", "error");
       return;
     }
     const added = audio.map((file) => ({
@@ -52,7 +52,7 @@ export default function MusicTab({ tracks, onChange }) {
     audio.src = track.url;
     audio.play().then(
       () => setPlayingId(track.id),
-      () => showSnackbar("Не удалось воспроизвести файл"),
+      () => showSnackbar("Не удалось воспроизвести файл", "error"),
     );
   };
 

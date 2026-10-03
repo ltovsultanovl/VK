@@ -1254,6 +1254,18 @@ input, textarea { font: inherit; color: var(--text); }
   animation: snack-in 0.25s ease;
 }
 @keyframes snack-in { from { opacity: 0; transform: translateY(12px); } }
+.snackbar--error svg { color: var(--like); }
+.snackbar--info svg { color: var(--accent); }
+
+/* Экран ошибки (ErrorBoundary) */
+.error-screen {
+  max-width: 480px;
+  margin: 40px auto;
+  padding: 32px 24px;
+  text-align: center;
+}
+.error-screen__title { font-size: 17px; font-weight: 600; }
+.error-screen__text { margin: 8px 0 20px; color: var(--text-secondary); font-size: 14px; line-height: 20px; }
 
 /* =========================================================
    Профиль: медиа, «Создать пост», промо, друзья
@@ -1680,6 +1692,14 @@ input, textarea { font: inherit; color: var(--text); }
   height: 100%;
   object-fit: contain;
   user-select: none;
+}
+.viewer__broken {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #939393;
+  font-size: 15px;
 }
 .viewer__nav {
   position: absolute;

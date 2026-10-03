@@ -31,6 +31,7 @@ import {
   VideoIcon,
 } from "../components/Icons";
 import { useProfile } from "../context/ProfileContext";
+import { useMedia } from "../context/MediaContext";
 import { bg, communities, people } from "../data";
 import { formatEducation } from "../profile";
 import { useDismiss, usePhotos } from "../hooks";
@@ -54,7 +55,7 @@ function Cover() {
       updateProfile({ cover: await readImage(file, { max: 1600 }) });
       showSnackbar("Обложка обновлена");
     } catch (e) {
-      showSnackbar(e.message);
+      showSnackbar(e.message, "error");
     }
   };
 
@@ -275,37 +276,41 @@ function MediaCard() {
   const [viewerIndex, setViewerIndex] = useState(null);
   const [toDelete, setToDelete] = useState(null);
   const inputRef = useRef(null);
-  // Музыка и видео — в памяти: живут, пока открыта страница
-  const [tracks, setTracks] = useState([]);
-  const [videos, setVideos] = useState([]);
+  const { tracks, setTracks, videos, setVideos } = useMedia();
   const visible = photos.slice(0, PHOTOS_PREVIEW);
 
   useEffect(() => {
     if (!saved) {
-      showSnackbar("В браузере закончилось место — новые фото не сохранятся после перезагрузки");
+      showSnackbar("В браузере закончилось место — новые фото не сохранятся после перезагрузки", "error");
     }
   }, [saved, showSnackbar]);
 
   const upload = async (files) => {
     const images = [...files].filter((f) => f.type.startsWith("image/"));
     if (!images.length) {
-      showSnackbar("Выберите изображение в формате JPG, PNG или GIF");
+      showSnackbar("Выберите изображение в формате JPG, PNG или GIF", "error");
       return;
     }
     setUploading(true);
-    try {
-      const added = await Promise.all(
-        images.map((file) => readImage(file, { max: 1000, quality: 0.8 })),
-      );
+    const results = await Promise.allSettled(
+      images.map((file) => readImage(file, { max: 1000, quality: 0.8 })),
+    );
+    setUploading(false);
+
+    const added = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
+    const failed = results.length - added.length;
+    if (added.length) {
       addPhotos(added);
       setTab("photos");
+    }
+    if (failed && added.length) {
+      showSnackbar(`Загружено ${added.length} из ${results.length}: часть файлов не удалось прочитать`, "error");
+    } else if (failed) {
+      showSnackbar(results[0].reason.message, "error");
+    } else {
       showSnackbar(
         added.length > 1 ? `Загружено фотографий: ${added.length}` : "Фотография загружена",
       );
-    } catch (e) {
-      showSnackbar(e.message);
-    } finally {
-      setUploading(false);
     }
   };
 
@@ -680,7 +685,7 @@ export default function Profile({ posts, postActions, onNavigate }) {
             </div>
             <div className="friends-mini friends-mini--wide">
               {people.slice(0, 8).map((p) => (
-                <a key={p.id} href="#">
+                <a key={p.id} href="#friends">
                   <Avatar name={p.name} color={p.color} size={64} />
                   <span>{p.name.split(" ")[0]}</span>
                 </a>

@@ -71,6 +71,7 @@ export default function PhotoViewer({
   const { name, updateProfile } = useProfile();
   const showSnackbar = useSnackbar();
   const [confirming, setConfirming] = useState(false);
+  const [failedSrc, setFailedSrc] = useState(null);
   const [comment, setComment] = useState("");
   const commentsRef = useRef(null);
   const count = photos.length;
@@ -128,7 +129,7 @@ export default function PhotoViewer({
       await navigator.clipboard.writeText(`${location.origin}${location.pathname}#profile`);
       showSnackbar("Ссылка скопирована");
     } catch {
-      showSnackbar("Не удалось скопировать ссылку");
+      showSnackbar("Не удалось скопировать ссылку", "error");
     }
   };
 
@@ -172,12 +173,17 @@ export default function PhotoViewer({
         {/* ---------- Фото ---------- */}
         <div className="viewer__stage">
           <div className="viewer__image">
-            <img
-              src={photo.src}
-              alt=""
-              onClick={() => count > 1 && go(1)}
-              style={{ cursor: count > 1 ? "pointer" : "default" }}
-            />
+            {photo.src === failedSrc ? (
+              <div className="viewer__broken">Не удалось загрузить фотографию</div>
+            ) : (
+              <img
+                src={photo.src}
+                alt=""
+                onClick={() => count > 1 && go(1)}
+                onError={() => setFailedSrc(photo.src)}
+                style={{ cursor: count > 1 ? "pointer" : "default" }}
+              />
+            )}
             {count > 1 && (
               <>
                 <button className="viewer__nav viewer__nav--prev" onClick={() => go(-1)} title="Предыдущая">
@@ -202,7 +208,7 @@ export default function PhotoViewer({
               <span className="viewer__dot">·</span>
               <button
                 className="viewer__link"
-                onClick={() => showSnackbar("Отметки людей пока недоступны")}
+                onClick={() => showSnackbar("Отметки людей пока недоступны", "info")}
               >
                 Отметить человека
               </button>

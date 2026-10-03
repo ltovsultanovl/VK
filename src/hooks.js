@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { defaultPhotos } from "./data";
+import { useSnackbar } from "./components/Snackbar";
+
+export const STORAGE_FULL_MESSAGE =
+  "В браузере закончилось место — последние изменения пропадут после перезагрузки";
 
 // Закрывает попап по клику снаружи элемента ref и по Esc
 export function useDismiss(ref, open, onClose) {
@@ -73,6 +77,8 @@ export function usePhotos() {
 
 // useState, который переживает перезагрузку страницы (хранится в localStorage)
 export function useStoredState(key, initial) {
+  const showSnackbar = useSnackbar();
+  const failedRef = useRef(false);
   const [value, setValue] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem(key)) ?? initial;
@@ -81,13 +87,16 @@ export function useStoredState(key, initial) {
     }
   });
 
+  // Не смогли сохранить — предупреждаем один раз, пока запись снова не пройдёт
   useEffect(() => {
     try {
       localStorage.setItem(key, JSON.stringify(value));
+      failedRef.current = false;
     } catch {
-      /* хранилище переполнено — данные живут до перезагрузки */
+      if (!failedRef.current) showSnackbar(STORAGE_FULL_MESSAGE, "error");
+      failedRef.current = true;
     }
-  }, [key, value]);
+  }, [key, value, showSnackbar]);
 
   return [value, setValue];
 }

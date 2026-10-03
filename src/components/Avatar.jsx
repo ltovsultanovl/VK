@@ -1,13 +1,23 @@
 import { useState } from "react";
 import { initials } from "../utils";
 
-// Аватар: фото, если есть, иначе градиент с инициалами — как у пользователей VK без фото
+// Силуэт человека, как у страниц VK без фотографии. Низ обрезает круг аватара
+const Silhouette = () => (
+  <svg className="avatar__silhouette" viewBox="0 0 100 100" aria-hidden="true">
+    <circle cx="50" cy="39" r="17" />
+    <ellipse cx="50" cy="94" rx="33" ry="28" />
+  </svg>
+);
+
+// Аватар: фото, если есть, иначе градиент с инициалами.
+// empty — серый кружок с силуэтом вместо инициалов (как у своей страницы без фото в VK)
 export default function Avatar({
   name,
   color,
   src,
   size = 40,
   online,
+  empty = false,
   children,
 }) {
   // Если картинка не загрузилась (нет сети, битый файл) — показываем инициалы
@@ -16,7 +26,7 @@ export default function Avatar({
 
   return (
     <span
-      className="avatar"
+      className={`avatar ${empty && !showImage ? "avatar--empty" : ""}`}
       style={{
         "--c": color,
         width: size,
@@ -31,6 +41,8 @@ export default function Avatar({
           alt={name}
           onError={() => setFailedSrc(src)}
         />
+      ) : empty ? (
+        <Silhouette />
       ) : (
         (children ?? initials(name))
       )}

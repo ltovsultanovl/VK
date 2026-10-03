@@ -4,6 +4,9 @@ import Sidebar from "./components/Sidebar";
 import Feed from "./pages/Feed";
 import Profile from "./pages/Profile";
 import Messenger from "./pages/Messenger";
+import OnlineMessenger from "./pages/OnlineMessenger";
+import { useChat } from "./context/ChatContext";
+import { chatEnabled } from "./lib/supabase";
 import Friends from "./pages/Friends";
 import { autoReplies, initialDialogs, initialPosts, people } from "./data";
 import EditProfile from "./pages/EditProfile";
@@ -40,6 +43,7 @@ export default function App() {
   const [posts, setPosts] = useState(initialPosts);
   const [dialogs, setDialogs] = useState(initialDialogs);
   const [activeDialogId, setActiveDialogId] = useState(initialDialogs[0].id);
+  const chat = useChat();
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -137,6 +141,8 @@ export default function App() {
 
   const messageFriend = (personId) => {
     navigate("messages");
+    // В онлайн-чате только настоящие участники, демо-друзей там нет
+    if (chatEnabled) return;
     if (dialogs.some((d) => d.id === personId)) {
       openDialog(personId);
     } else {
@@ -149,7 +155,9 @@ export default function App() {
     }
   };
 
-  const unreadMessages = dialogs.reduce((sum, d) => sum + d.unread, 0);
+  const unreadMessages = chatEnabled
+    ? chat.unreadTotal
+    : dialogs.reduce((sum, d) => sum + d.unread, 0);
 
   return (
     <>
@@ -175,7 +183,8 @@ export default function App() {
               />
             )}
             {view === "edit" && <EditProfile onNavigate={navigate} />}
-            {view === "messages" && (
+            {view === "messages" && chatEnabled && <OnlineMessenger />}
+            {view === "messages" && !chatEnabled && (
               <Messenger
                 dialogs={dialogs}
                 activeId={activeDialogId}

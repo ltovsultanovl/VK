@@ -65,3 +65,32 @@ export const formatDate = (value) => {
   const year = date.getFullYear() !== now.getFullYear() ? ` ${date.getFullYear()}` : '';
   return `${date.getDate()} ${MONTHS_SHORT[date.getMonth()]}${year} в ${time}`;
 };
+
+const MONTHS_GENITIVE = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+
+const daysAgo = (date) =>
+  Math.round((new Date().setHours(0, 0, 0, 0) - new Date(date).setHours(0, 0, 0, 0)) / 86_400_000);
+
+// Время сообщения: «14:05»
+export const formatTime = (value) =>
+  new Date(value).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
+// Разделитель в чате: «Сегодня», «Вчера», «3 октября», «3 октября 2025»
+export const formatDay = (value) => {
+  const date = new Date(value);
+  const diff = daysAgo(date);
+  if (diff === 0) return 'Сегодня';
+  if (diff === 1) return 'Вчера';
+  const year = date.getFullYear() !== new Date().getFullYear() ? ` ${date.getFullYear()}` : '';
+  return `${date.getDate()} ${MONTHS_GENITIVE[date.getMonth()]}${year}`;
+};
+
+// Время в списке чатов: сегодня — «14:05», вчера — «вчера», раньше — «3 окт»
+export const formatDialogTime = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  const diff = daysAgo(date);
+  if (diff === 0) return formatTime(date);
+  if (diff === 1) return 'вчера';
+  return `${date.getDate()} ${MONTHS_SHORT[date.getMonth()]}`;
+};

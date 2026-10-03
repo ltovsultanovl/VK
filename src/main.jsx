@@ -4,6 +4,7 @@ import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ProfileProvider } from "./context/ProfileContext";
 import { MediaProvider } from "./context/MediaContext";
+import { ChatProvider } from "./context/ChatContext";
 import { SnackbarProvider } from "./components/Snackbar";
 import "./styles.css";
 
@@ -13,9 +14,11 @@ createRoot(document.getElementById("root")).render(
     <ErrorBoundary>
       <SnackbarProvider>
         <ProfileProvider>
-          <MediaProvider>
-            <App />
-          </MediaProvider>
+          <ChatProvider>
+            <MediaProvider>
+              <App />
+            </MediaProvider>
+          </ChatProvider>
         </ProfileProvider>
       </SnackbarProvider>
     </ErrorBoundary>

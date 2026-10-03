@@ -1,0 +1,711 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import Avatar from "../components/Avatar";
+import MeAvatar from "../components/MeAvatar";
+import Composer from "../components/Composer";
+import Post from "../components/Post";
+import Modal from "../components/Modal";
+import AvatarUploadModal from "../components/AvatarUploadModal";
+import ProfileDetailsModal from "../components/ProfileDetailsModal";
+import PhotoViewer from "../components/PhotoViewer";
+import ConfirmModal from "../components/ConfirmModal";
+import AlbumsTab from "../components/media/AlbumsTab";
+import MusicTab from "../components/media/MusicTab";
+import VideoTab from "../components/media/VideoTab";
+import ArticlesTab from "../components/media/ArticlesTab";
+import { useSnackbar } from "../components/Snackbar";
+import {
+  AlbumsIcon,
+  ArticlesIcon,
+  CameraIcon,
+  ChevronDownIcon,
+  ClipsIcon,
+  CloseIcon,
+  EducationIcon,
+  InfoIcon,
+  MapPinIcon,
+  MusicIcon,
+  PhotoIcon,
+  PlusIcon,
+  SearchIcon,
+  TrashIcon,
+  VideoIcon,
+} from "../components/Icons";
+import { useProfile } from "../context/ProfileContext";
+import { bg, communities, people } from "../data";
+import { formatEducation } from "../profile";
+import { useDismiss, usePhotos } from "../hooks";
+import { readImage } from "../utils";
+
+const DEFAULT_COVER = "var(--cover-empty)";
+const STATUS_LIMIT = 140;
+
+// ---------- Обложка ----------
+function Cover() {
+  const { profile, updateProfile } = useProfile();
+  const showSnackbar = useSnackbar();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const ref = useRef(null);
+  const inputRef = useRef(null);
+  const close = useCallback(() => setMenuOpen(false), []);
+  useDismiss(ref, menuOpen, close);
+
+  const upload = async (file) => {
+    try {
+      updateProfile({ cover: await readImage(file, { max: 1600 }) });
+      showSnackbar("Обложка обновлена");
+    } catch (e) {
+      showSnackbar(e.message);
+    }
+  };
+
+  return (
+    <div
+      className="profile-cover"
+      style={{
+        background: profile.cover
+          ? bg(profile.cover, DEFAULT_COVER)
+          : DEFAULT_COVER,
+      }}
+    >
+      <div className="profile-cover__action" ref={ref}>
+        <button
+          className="btn btn--overlay"
+          onClick={() => setMenuOpen((o) => !o)}
+        >
+          <CameraIcon size={20} /> Изменить обложку
+        </button>
+        {menuOpen && (
+          <div className="dropdown dropdown--right">
+            <button
+              className="dropdown__item"
+              onClick={() => {
+                close();
+                inputRef.current.click();
+              }}
+            >
+              <PhotoIcon /> Загрузить изображение
+            </button>
+            {profile.cover && (
+              <button
+                className="dropdown__item"
+                onClick={() => {
+                  close();
+                  updateProfile({ cover: null });
+                  showSnackbar("Обложка удалена");
+                }}
+              >
+                <TrashIcon /> Удалить обложку
+              </button>
+            )}
+          </div>
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(e) => {
+            upload(e.target.files[0]);
+            e.target.value = "";
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ---------- Аватар с меню при наведении ----------
+function ProfileAvatar() {
+  const { profile, updateProfile } = useProfile();
+  const showSnackbar = useSnackbar();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [modal, setModal] = useState(null); // 'upload' | 'delete'
+  const ref = useRef(null);
+  const close = useCallback(() => setMenuOpen(false), []);
+  useDismiss(ref, menuOpen, close);
+
+  const open = (name) => {
+    close();
+    setModal(name);
+  };
+
+  return (
+    <div className="profile-info__avatar" ref={ref}>
+      <button
+        className="avatar-edit"
+        onClick={() => setMenuOpen((o) => !o)}
+        title="Изменить фотографию"
+      >
+        <MeAvatar size={148} />
+        <span className="avatar-edit__overlay">
+          <CameraIcon size={28} />
+        </span>
+      </button>
+      <button
+        className="avatar-add"
+        onClick={() => open("upload")}
+        title="Обновить фотографию"
+        aria-label="Обновить фотографию"
+      >
+        <PlusIcon size={16} />
+      </button>
+
+      {menuOpen && (
+        <div className="dropdown dropdown--left">
+          <button className="dropdown__item" onClick={() => open("upload")}>
+            <PhotoIcon /> Обновить фотографию
+          </button>
+          {profile.avatar && (
+            <button className="dropdown__item" onClick={() => open("delete")}>
+              <TrashIcon /> Удалить фотографию
+            </button>
+          )}
+        </div>
+      )}
+
+      {modal === "upload" && (
+        <AvatarUploadModal onClose={() => setModal(null)} />
+      )}
+
+      {modal === "delete" && (
+        <Modal
+          title="Удаление фотографии"
+          onClose={() => setModal(null)}
+          width={420}
+          footer={
+            <>
+              <button
+                className="btn btn--secondary"
+                onClick={() => setModal(null)}
+              >
+                Отмена
+              </button>
+              <button
+                className="btn btn--danger"
+                onClick={() => {
+                  updateProfile({ avatar: null });
+                  setModal(null);
+                  showSnackbar("Фотография удалена");
+                }}
+              >
+                Удалить
+              </button>
+            </>
+          }
+        >
+          <p className="modal__text">
+            Вы действительно хотите удалить фотографию?
+          </p>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ---------- Статус: редактирование по клику ----------
+function Status() {
+  const { profile, updateProfile } = useProfile();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(profile.status);
+  const ref = useRef(null);
+  const cancel = useCallback(() => setEditing(false), []);
+  useDismiss(ref, editing, cancel);
+
+  const start = () => {
+    setValue(profile.status);
+    setEditing(true);
+  };
+
+  const save = (e) => {
+    e.preventDefault();
+    updateProfile({ status: value.trim() });
+    setEditing(false);
+  };
+
+  if (!editing) {
+    return (
+      <div
+        className={`profile-info__status status ${profile.status ? "" : "status--empty"}`}
+        onClick={start}
+        title="Изменить статус"
+      >
+        {profile.status || "Установить статус"}
+      </div>
+    );
+  }
+
+  return (
+    <form className="status-editor" ref={ref} onSubmit={save}>
+      <input
+        className="field"
+        autoFocus
+        value={value}
+        maxLength={STATUS_LIMIT}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="Введите статус"
+      />
+      <div className="status-editor__footer">
+        <span className="muted">{STATUS_LIMIT - value.length}</span>
+        <button type="button" className="btn btn--tertiary" onClick={cancel}>
+          Отмена
+        </button>
+        <button className="btn">Сохранить</button>
+      </div>
+    </form>
+  );
+}
+
+// ---------- Медиа: фото, альбомы, музыка… ----------
+const MEDIA_TABS = [
+  { id: "photos", label: "Фото", Icon: PhotoIcon },
+  { id: "albums", label: "Альбомы", Icon: AlbumsIcon },
+  { id: "music", label: "Музыка", Icon: MusicIcon },
+  { id: "video", label: "Видео", Icon: VideoIcon },
+  { id: "articles", label: "Статьи", Icon: ArticlesIcon },
+];
+const PHOTOS_PREVIEW = 6;
+
+function MediaCard() {
+  const showSnackbar = useSnackbar();
+  const { photos, addPhotos, removePhoto, updatePhoto, saved } = usePhotos();
+  const [tab, setTab] = useState("photos");
+  const [allOpen, setAllOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(null);
+  const [toDelete, setToDelete] = useState(null);
+  const inputRef = useRef(null);
+  // Музыка и видео — в памяти: живут, пока открыта страница
+  const [tracks, setTracks] = useState([]);
+  const [videos, setVideos] = useState([]);
+  const visible = photos.slice(0, PHOTOS_PREVIEW);
+
+  useEffect(() => {
+    if (!saved) {
+      showSnackbar("В браузере закончилось место — новые фото не сохранятся после перезагрузки");
+    }
+  }, [saved, showSnackbar]);
+
+  const upload = async (files) => {
+    const images = [...files].filter((f) => f.type.startsWith("image/"));
+    if (!images.length) {
+      showSnackbar("Выберите изображение в формате JPG, PNG или GIF");
+      return;
+    }
+    setUploading(true);
+    try {
+      const added = await Promise.all(
+        images.map((file) => readImage(file, { max: 1000, quality: 0.8 })),
+      );
+      addPhotos(added);
+      setTab("photos");
+      showSnackbar(
+        added.length > 1 ? `Загружено фотографий: ${added.length}` : "Фотография загружена",
+      );
+    } catch (e) {
+      showSnackbar(e.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const remove = (id) => {
+    removePhoto(id);
+    showSnackbar("Фотография удалена");
+  };
+
+  // Перетаскивание файлов на блок
+  const dropProps = {
+    onDragOver: (e) => {
+      if (![...e.dataTransfer.types].includes("Files")) return;
+      e.preventDefault();
+      setDragOver(true);
+    },
+    onDragLeave: (e) => {
+      if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false);
+    },
+    onDrop: (e) => {
+      e.preventDefault();
+      setDragOver(false);
+      upload(e.dataTransfer.files);
+    },
+  };
+
+  return (
+    <section className={`card media ${dragOver ? "media--drag" : ""}`} {...dropProps}>
+      <div className="media__tabs" role="tablist">
+        {MEDIA_TABS.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            className={`seg media__tab ${tab === id ? "active" : ""}`}
+            onClick={() => setTab(id)}
+          >
+            <Icon size={20} />
+            {label}
+            {id === "photos" && photos.length > 0 && (
+              <span className="media__count">{photos.length}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {tab === "photos" ? (
+        <>
+          {photos.length > 0 ? (
+            <div className="media__photos">
+              {visible.map((p, i) => (
+                <div key={p.id} className="media__photo">
+                  <button
+                    className="media__photo-open"
+                    style={{ background: bg(p.src, "var(--field-bg)") }}
+                    onClick={() => setViewerIndex(i)}
+                    aria-label="Открыть фотографию"
+                  />
+                  <button
+                    className="media__photo-delete"
+                    onClick={() => setToDelete(p.id)}
+                    title="Удалить фотографию"
+                    aria-label="Удалить фотографию"
+                  >
+                    <CloseIcon size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="media__empty">
+              <PhotoIcon size={32} />
+              Здесь пока нет фотографий — загрузите первую или перетащите файлы сюда
+            </div>
+          )}
+
+          <div className="media__actions">
+            <button
+              className="btn btn--neutral"
+              onClick={() => inputRef.current.click()}
+              disabled={uploading}
+            >
+              {uploading ? "Загрузка…" : "Загрузить фото"}
+            </button>
+            <button className="btn btn--neutral" onClick={() => setAllOpen(true)}>
+              Показать всё
+            </button>
+          </div>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(e) => {
+              upload(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        </>
+      ) : tab === "albums" ? (
+        <AlbumsTab />
+      ) : tab === "music" ? (
+        <MusicTab tracks={tracks} onChange={setTracks} />
+      ) : tab === "video" ? (
+        <VideoTab videos={videos} onChange={setVideos} />
+      ) : (
+        <ArticlesTab />
+      )}
+
+      {dragOver && <div className="media__drop">Отпустите, чтобы загрузить фото</div>}
+
+      {viewerIndex !== null && (
+        <PhotoViewer
+          photos={photos}
+          index={viewerIndex}
+          onIndexChange={setViewerIndex}
+          onClose={() => setViewerIndex(null)}
+          onDelete={remove}
+          onUpdate={updatePhoto}
+        />
+      )}
+
+      {allOpen && (
+        <Modal
+          title={
+            <>
+              Фотографии <span className="muted">{photos.length}</span>
+            </>
+          }
+          onClose={() => setAllOpen(false)}
+          width={760}
+          footer={
+            <button
+              className="btn"
+              onClick={() => inputRef.current.click()}
+              disabled={uploading}
+            >
+              {uploading ? "Загрузка…" : "Загрузить фото"}
+            </button>
+          }
+        >
+          {photos.length > 0 ? (
+            <div className="photos-all">
+              {photos.map((p, i) => (
+                <div key={p.id} className="media__photo">
+                  <button
+                    className="media__photo-open"
+                    style={{ background: bg(p.src, "var(--field-bg)") }}
+                    onClick={() => {
+                      setAllOpen(false);
+                      setViewerIndex(i);
+                    }}
+                    aria-label="Открыть фотографию"
+                  />
+                  <button
+                    className="media__photo-delete"
+                    onClick={() => setToDelete(p.id)}
+                    title="Удалить фотографию"
+                    aria-label="Удалить фотографию"
+                  >
+                    <CloseIcon size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="media__empty">
+              <PhotoIcon size={32} />
+              Здесь пока нет фотографий
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {toDelete && (
+        <ConfirmModal
+          title="Удаление фотографии"
+          text="Вы действительно хотите удалить эту фотографию?"
+          onConfirm={() => {
+            remove(toDelete);
+            setToDelete(null);
+          }}
+          onClose={() => setToDelete(null)}
+        />
+      )}
+    </section>
+  );
+}
+
+// ---------- «Создать пост»: свёрнутая кнопка раскрывается в редактор ----------
+function CreatePost({ onPublish }) {
+  const [open, setOpen] = useState(false);
+
+  if (open) {
+    return (
+      <Composer
+        autoFocus
+        onPublish={(text) => {
+          onPublish(text);
+          setOpen(false);
+        }}
+        onCancel={() => setOpen(false)}
+      />
+    );
+  }
+
+  return (
+    <div className="card create-post">
+      <button className="create-post__main" onClick={() => setOpen(true)}>
+        <PlusIcon size={22} />
+        Создать пост
+      </button>
+      <span className="create-post__divider" />
+      <button className="icon-btn" title="Клип">
+        <ClipsIcon />
+      </button>
+      <button className="icon-btn" title="Статья">
+        <ArticlesIcon />
+      </button>
+    </div>
+  );
+}
+
+// ---------- Стена ----------
+const WALL_TABS = [
+  { id: "all", label: "Все записи" },
+  { id: "mine", label: "Мои записи" },
+];
+
+function Wall({ posts, postActions }) {
+  const [tab, setTab] = useState("all");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+
+  // На стене — мои записи и записи друзей; закреплённая всегда первая
+  const wallPosts = posts
+    .filter((p) => p.mine || p.wall)
+    .filter((p) => tab === "all" || p.mine)
+    .filter((p) => !q || p.text?.toLowerCase().includes(q))
+    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setQuery("");
+  };
+
+  return (
+    <>
+      <div className="card wall-head">
+        {searchOpen ? (
+          <div className="wall-search">
+            <SearchIcon size={20} />
+            <input
+              autoFocus
+              placeholder="Поиск по записям"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Escape" && closeSearch()}
+            />
+            <button className="btn btn--tertiary" onClick={closeSearch}>
+              Отмена
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="wall-tabs">
+              {WALL_TABS.map((t) => (
+                <button
+                  key={t.id}
+                  className={`seg ${tab === t.id ? "active" : ""}`}
+                  onClick={() => setTab(t.id)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <button
+              className="icon-btn"
+              title="Поиск по записям"
+              onClick={() => setSearchOpen(true)}
+            >
+              <SearchIcon size={20} />
+            </button>
+          </>
+        )}
+      </div>
+
+      {wallPosts.length > 0 ? (
+        wallPosts.map((post) => <Post key={post.id} post={post} {...postActions} />)
+      ) : (
+        <div className="card empty">
+          {q ? "По вашему запросу ничего не найдено" : "На стене пока нет ни одной записи"}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ---------- Страница ----------
+
+export default function Profile({ posts, postActions, onNavigate }) {
+  const { profile, name } = useProfile();
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const education = formatEducation(profile.education);
+
+  return (
+    <>
+      <div className="card profile-head">
+        <Cover />
+        <div className="profile-info">
+          <ProfileAvatar />
+          <div className="profile-info__meta">
+            <h1 className="profile-info__name">{name}</h1>
+            <Status />
+            <div className="profile-info__details">
+              {profile.contacts.city && (
+                <span className="profile-info__chip">
+                  <MapPinIcon size={20} />
+                  {profile.contacts.city}
+                </span>
+              )}
+              {education && (
+                <span className="profile-info__chip">
+                  <EducationIcon size={20} />
+                  {education}
+                </span>
+              )}
+              <button
+                className="profile-info__chip profile-info__more"
+                onClick={() => setDetailsOpen(true)}
+              >
+                <InfoIcon size={20} />
+                Подробнее
+              </button>
+            </div>
+          </div>
+          <div className="profile-info__actions">
+            <button className="btn btn--neutral" onClick={() => onNavigate("edit")}>
+              Редактировать профиль
+            </button>
+            <button className="btn btn--neutral">
+              Ещё
+              <ChevronDownIcon size={16} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {detailsOpen && (
+        <ProfileDetailsModal
+          onClose={() => setDetailsOpen(false)}
+          onEdit={() => {
+            setDetailsOpen(false);
+            onNavigate("edit");
+          }}
+        />
+      )}
+
+      <div className="columns columns--profile">
+        <div>
+          <MediaCard />
+          <CreatePost onPublish={postActions.onPublish} />
+
+          <Wall posts={posts} postActions={postActions} />
+        </div>
+
+        <aside className="columns__side">
+          <section className="card">
+            <div className="card__header">
+              Друзья <span className="muted">{people.length}</span>
+            </div>
+            <div className="friends-mini friends-mini--wide">
+              {people.slice(0, 8).map((p) => (
+                <a key={p.id} href="#">
+                  <Avatar name={p.name} color={p.color} size={64} />
+                  <span>{p.name.split(" ")[0]}</span>
+                </a>
+              ))}
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="card__header">
+              Подписки <span className="muted">{communities.length}</span>
+            </div>
+            <div className="subs-list">
+              {communities.map((c) => (
+                <div key={c.id} className="subs-item">
+                  <Avatar name={c.name} color={c.color} size={40} />
+                  <div>
+                    <div className="subs-item__name">{c.name}</div>
+                    <div className="subs-item__desc">{c.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </aside>
+      </div>
+    </>
+  );
+}

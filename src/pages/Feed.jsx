@@ -2,6 +2,7 @@ import { useState } from "react";
 import Stories from "../components/Stories";
 import Composer from "../components/Composer";
 import Post from "../components/Post";
+import SideMenu from "../components/SideMenu";
 
 const tabs = ["Новости", "Рекомендации", "Поиск", "Понравилось"];
 const extra = [{ label: "Обновления", counter: 4 }, { label: "Комментарии" }];
@@ -24,24 +25,17 @@ export default function Feed({ posts, postActions }) {
       </div>
 
       <aside className="columns__side">
-        <div className="card side-menu">
-          {tabs.map((label) => (
-            <div
-              key={label}
-              className={`side-menu__item ${tab === label ? "active" : ""}`}
-              onClick={() => setTab(label)}
-            >
-              {label}
-            </div>
-          ))}
-          <div className="separator" />
-          {extra.map(({ label, counter }) => (
-            <div key={label} className="side-menu__item">
-              {label}
-              {counter && <span className="counter">{counter}</span>}
-            </div>
-          ))}
-        </div>
+        <SideMenu
+          items={[
+            ...tabs.map((label) => ({
+              label,
+              active: tab === label,
+              onClick: () => setTab(label),
+            })),
+            "separator",
+            ...extra,
+          ]}
+        />
       </aside>
     </div>
   );

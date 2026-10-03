@@ -17,14 +17,9 @@ const groups = [
   [
     { view: "profile", Icon: UserIcon, label: "Профиль" },
     { view: "feed", Icon: NewsIcon, label: "Лента" },
-    {
-      view: "messages",
-      Icon: MessageIcon,
-      label: "Мессенджер",
-      counterKey: "messages",
-    },
+    { view: "messages", Icon: MessageIcon, label: "Мессенджер" },
     { Icon: PhoneIcon, label: "Звонки" },
-    { view: "friends", Icon: FriendsIcon, label: "Друзья", counter: 1 },
+    { view: "friends", Icon: FriendsIcon, label: "Друзья" },
     { Icon: GroupsIcon, label: "Сообщества" },
     { Icon: PhotoIcon, label: "Фото" },
     { Icon: MusicIcon, label: "Музыка" },
@@ -39,12 +34,13 @@ const groups = [
 
 const FOOTER_LINKS = ["Блог", "Разработчикам", "Для бизнеса", "Ещё"];
 
-export default function Sidebar({ view, onNavigate, unreadMessages }) {
+// counters — числа у пунктов по их view: { messages: 3, friends: 1 }
+export default function Sidebar({ view, onNavigate, counters = {} }) {
   // Редактирование профиля — подраздел профиля
   const activeView = view === "edit" ? "profile" : view;
 
-  const renderItem = ({ view: target, Icon, label, counter, counterKey, dot }) => {
-    const value = counterKey === "messages" ? unreadMessages : counter;
+  const renderItem = ({ view: target, Icon, label, dot }) => {
+    const value = counters[target];
     return (
       <a
         key={label}

@@ -1,18 +1,18 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import ConfirmModal from "../ConfirmModal";
 import AddButton from "./AddButton";
 import MediaEmpty from "./MediaEmpty";
 import { CloseIcon, VideoIcon } from "../Icons";
 import { useSnackbar } from "../Snackbar";
+import { useFilePicker } from "../../hooks";
 
 // videos живут в MediaCard; файлы — object URL, до перезагрузки страницы
 export default function VideoTab({ videos, onChange }) {
   const showSnackbar = useSnackbar();
-  const inputRef = useRef(null);
   const [toDelete, setToDelete] = useState(null);
 
   const add = (files) => {
-    const list = [...files].filter((f) => f.type.startsWith("video/"));
+    const list = files.filter((f) => f.type.startsWith("video/"));
     if (!list.length) {
       showSnackbar("Выберите видеофайл: MP4, MOV или WEBM", "error");
       return;
@@ -27,6 +27,8 @@ export default function VideoTab({ videos, onChange }) {
     ]);
     showSnackbar(list.length > 1 ? `Добавлено видео: ${list.length}` : "Видео добавлено");
   };
+
+  const picker = useFilePicker({ accept: "video/*", multiple: true, onPick: add });
 
   return (
     <>
@@ -56,18 +58,8 @@ export default function VideoTab({ videos, onChange }) {
         <MediaEmpty Icon={VideoIcon}>Видеозаписей пока нет</MediaEmpty>
       )}
 
-      <AddButton onClick={() => inputRef.current.click()}>Добавить видео</AddButton>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="video/*"
-        multiple
-        hidden
-        onChange={(e) => {
-          add(e.target.files);
-          e.target.value = "";
-        }}
-      />
+      <AddButton onClick={picker.open}>Добавить видео</AddButton>
+      {picker.input}
 
       {toDelete && (
         <ConfirmModal

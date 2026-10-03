@@ -11,18 +11,7 @@ import {
   PhoneIcon,
 } from "./Icons";
 import { useProfile } from "../context/ProfileContext";
-import { formatBirthday, relationLabel } from "../profile";
-
-const INTEREST_LABELS = {
-  activities: "Деятельность",
-  interests: "Интересы",
-  music: "Любимая музыка",
-  movies: "Любимые фильмы",
-  books: "Любимые книги",
-  games: "Любимые игры",
-  quotes: "Любимые цитаты",
-  about: "О себе",
-};
+import { INTERESTS, formatBirthday, relationLabel } from "../profile";
 
 const join = (...parts) => parts.filter(Boolean).join(", ");
 
@@ -69,7 +58,9 @@ export default function ProfileDetailsModal({ onClose, onEdit }) {
     ],
   ].filter(([, , value]) => value);
 
-  const interests = Object.entries(p.interests).filter(([, v]) => v.trim());
+  const interests = INTERESTS.map(([key, label]) => [label, p.interests[key]]).filter(
+    ([, value]) => value?.trim(),
+  );
 
   return (
     <Modal
@@ -102,9 +93,9 @@ export default function ProfileDetailsModal({ onClose, onEdit }) {
         <>
           <div className="details__group">Личная информация</div>
           <div className="details">
-            {interests.map(([key, value]) => (
-              <div className="details__row details__row--text" key={key}>
-                <span className="details__label">{INTEREST_LABELS[key]}</span>
+            {interests.map(([label, value]) => (
+              <div className="details__row details__row--text" key={label}>
+                <span className="details__label">{label}</span>
                 <span className="details__value">{value}</span>
               </div>
             ))}

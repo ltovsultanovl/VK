@@ -9,6 +9,7 @@ import { autoReplies, initialDialogs, initialPosts, people } from "./data";
 import EditProfile from "./pages/EditProfile";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { nowTime } from "./utils";
+import { useStoredState } from "./hooks";
 
 // Тему до отрисовки уже поставил скрипт в index.html (с учётом системной)
 const readTheme = () => document.documentElement.dataset.theme || "light";
@@ -35,18 +36,13 @@ function PageError({ onRetry }) {
 
 export default function App() {
   const [view, setView] = useState(readView);
-  const [theme, setTheme] = useState(readTheme);
+  const [theme, setTheme] = useStoredState("theme", readTheme());
   const [posts, setPosts] = useState(initialPosts);
   const [dialogs, setDialogs] = useState(initialDialogs);
   const [activeDialogId, setActiveDialogId] = useState(initialDialogs[0].id);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    try {
-      localStorage.setItem("theme", theme);
-    } catch {
-      /* noop */
-    }
   }, [theme]);
 
   // Синхронизация страницы с адресом (#feed, #profile, #edit, #messages, #friends)
@@ -166,7 +162,7 @@ export default function App() {
         <Sidebar
           view={view}
           onNavigate={navigate}
-          unreadMessages={unreadMessages}
+          counters={{ messages: unreadMessages, friends: 1 }}
         />
         <main className="main">
           <ErrorBoundary key={view} fallback={(reset) => <PageError onRetry={reset} />}>

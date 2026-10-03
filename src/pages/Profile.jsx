@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import Avatar from "../components/Avatar";
 import MeAvatar from "../components/MeAvatar";
 import Composer from "../components/Composer";
@@ -34,7 +34,7 @@ import { useProfile } from "../context/ProfileContext";
 import { useMedia } from "../context/MediaContext";
 import { bg, communities, people } from "../data";
 import { formatEducation } from "../profile";
-import { useDismiss, usePhotos } from "../hooks";
+import { useDismiss, useDropdown, useFileDrop, useFilePicker, usePhotos } from "../hooks";
 import { readImage } from "../utils";
 
 const DEFAULT_COVER = "var(--cover-empty)";
@@ -44,11 +44,8 @@ const STATUS_LIMIT = 140;
 function Cover() {
   const { profile, updateProfile } = useProfile();
   const showSnackbar = useSnackbar();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const ref = useRef(null);
-  const inputRef = useRef(null);
-  const close = useCallback(() => setMenuOpen(false), []);
-  useDismiss(ref, menuOpen, close);
+  const menu = useDropdown();
+  const picker = useFilePicker({ accept: "image/*", onPick: ([file]) => upload(file) });
 
   const upload = async (file) => {
     try {
@@ -68,20 +65,17 @@ function Cover() {
           : DEFAULT_COVER,
       }}
     >
-      <div className="profile-cover__action" ref={ref}>
-        <button
-          className="btn btn--overlay"
-          onClick={() => setMenuOpen((o) => !o)}
-        >
+      <div className="profile-cover__action" ref={menu.ref}>
+        <button className="btn btn--overlay" onClick={menu.toggle}>
           <CameraIcon size={20} /> Изменить обложку
         </button>
-        {menuOpen && (
+        {menu.open && (
           <div className="dropdown dropdown--right">
             <button
               className="dropdown__item"
               onClick={() => {
-                close();
-                inputRef.current.click();
+                menu.close();
+                picker.open();
               }}
             >
               <PhotoIcon /> Загрузить изображение
@@ -90,7 +84,7 @@ function Cover() {
               <button
                 className="dropdown__item"
                 onClick={() => {
-                  close();
+                  menu.close();
                   updateProfile({ cover: null });
                   showSnackbar("Обложка удалена");
                 }}
@@ -100,16 +94,7 @@ function Cover() {
             )}
           </div>
         )}
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          hidden
-          onChange={(e) => {
-            upload(e.target.files[0]);
-            e.target.value = "";
-          }}
-        />
+        {picker.input}
       </div>
     </div>
   );
@@ -119,24 +104,17 @@ function Cover() {
 function ProfileAvatar() {
   const { profile, updateProfile } = useProfile();
   const showSnackbar = useSnackbar();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const menu = useDropdown();
   const [modal, setModal] = useState(null); // 'upload' | 'delete'
-  const ref = useRef(null);
-  const close = useCallback(() => setMenuOpen(false), []);
-  useDismiss(ref, menuOpen, close);
 
   const open = (name) => {
-    close();
+    menu.close();
     setModal(name);
   };
 
   return (
-    <div className="profile-info__avatar" ref={ref}>
-      <button
-        className="avatar-edit"
-        onClick={() => setMenuOpen((o) => !o)}
-        title="Изменить фотографию"
-      >
+    <div className="profile-info__avatar" ref={menu.ref}>
+      <button className="avatar-edit" onClick={menu.toggle} title="Изменить фотографию">
         <MeAvatar size={148} />
         <span className="avatar-edit__overlay">
           <CameraIcon size={28} />
@@ -151,7 +129,7 @@ function ProfileAvatar() {
         <PlusIcon size={16} />
       </button>
 
-      {menuOpen && (
+      {menu.open && (
         <div className="dropdown dropdown--left">
           <button className="dropdown__item" onClick={() => open("upload")}>
             <PhotoIcon /> Обновить фотографию
@@ -169,35 +147,16 @@ function ProfileAvatar() {
       )}
 
       {modal === "delete" && (
-        <Modal
+        <ConfirmModal
           title="Удаление фотографии"
+          text="Вы действительно хотите удалить фотографию?"
+          onConfirm={() => {
+            updateProfile({ avatar: null });
+            setModal(null);
+            showSnackbar("Фотография удалена");
+          }}
           onClose={() => setModal(null)}
-          width={420}
-          footer={
-            <>
-              <button
-                className="btn btn--secondary"
-                onClick={() => setModal(null)}
-              >
-                Отмена
-              </button>
-              <button
-                className="btn btn--danger"
-                onClick={() => {
-                  updateProfile({ avatar: null });
-                  setModal(null);
-                  showSnackbar("Фотография удалена");
-                }}
-              >
-                Удалить
-              </button>
-            </>
-          }
-        >
-          <p className="modal__text">
-            Вы действительно хотите удалить фотографию?
-          </p>
-        </Modal>
+        />
       )}
     </div>
   );
@@ -266,27 +225,41 @@ const MEDIA_TABS = [
 ];
 const PHOTOS_PREVIEW = 6;
 
+// Плитка фото: клик открывает просмотр, ✕ в углу — удаление
+function PhotoTile({ photo, onOpen, onDelete }) {
+  return (
+    <div className="media__photo">
+      <button
+        className="media__photo-open"
+        style={{ background: bg(photo.src, "var(--field-bg)") }}
+        onClick={onOpen}
+        aria-label="Открыть фотографию"
+      />
+      <button
+        className="media__photo-delete"
+        onClick={onDelete}
+        title="Удалить фотографию"
+        aria-label="Удалить фотографию"
+      >
+        <CloseIcon size={16} />
+      </button>
+    </div>
+  );
+}
+
 function MediaCard() {
   const showSnackbar = useSnackbar();
-  const { photos, addPhotos, removePhoto, updatePhoto, saved } = usePhotos();
+  const { photos, addPhotos, removePhoto, updatePhoto } = usePhotos();
   const [tab, setTab] = useState("photos");
   const [allOpen, setAllOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(null);
   const [toDelete, setToDelete] = useState(null);
-  const inputRef = useRef(null);
   const { tracks, setTracks, videos, setVideos } = useMedia();
   const visible = photos.slice(0, PHOTOS_PREVIEW);
 
-  useEffect(() => {
-    if (!saved) {
-      showSnackbar("В браузере закончилось место — новые фото не сохранятся после перезагрузки", "error");
-    }
-  }, [saved, showSnackbar]);
-
   const upload = async (files) => {
-    const images = [...files].filter((f) => f.type.startsWith("image/"));
+    const images = files.filter((f) => f.type.startsWith("image/"));
     if (!images.length) {
       showSnackbar("Выберите изображение в формате JPG, PNG или GIF", "error");
       return;
@@ -319,22 +292,9 @@ function MediaCard() {
     showSnackbar("Фотография удалена");
   };
 
-  // Перетаскивание файлов на блок
-  const dropProps = {
-    onDragOver: (e) => {
-      if (![...e.dataTransfer.types].includes("Files")) return;
-      e.preventDefault();
-      setDragOver(true);
-    },
-    onDragLeave: (e) => {
-      if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false);
-    },
-    onDrop: (e) => {
-      e.preventDefault();
-      setDragOver(false);
-      upload(e.dataTransfer.files);
-    },
-  };
+  const picker = useFilePicker({ accept: "image/*", multiple: true, onPick: upload });
+  const [dragOver, dropProps] = useFileDrop(upload);
+  const uploadLabel = uploading ? "Загрузка…" : "Загрузить фото";
 
   return (
     <section className={`card media ${dragOver ? "media--drag" : ""}`} {...dropProps}>
@@ -361,22 +321,12 @@ function MediaCard() {
           {photos.length > 0 ? (
             <div className="media__photos">
               {visible.map((p, i) => (
-                <div key={p.id} className="media__photo">
-                  <button
-                    className="media__photo-open"
-                    style={{ background: bg(p.src, "var(--field-bg)") }}
-                    onClick={() => setViewerIndex(i)}
-                    aria-label="Открыть фотографию"
-                  />
-                  <button
-                    className="media__photo-delete"
-                    onClick={() => setToDelete(p.id)}
-                    title="Удалить фотографию"
-                    aria-label="Удалить фотографию"
-                  >
-                    <CloseIcon size={16} />
-                  </button>
-                </div>
+                <PhotoTile
+                  key={p.id}
+                  photo={p}
+                  onOpen={() => setViewerIndex(i)}
+                  onDelete={() => setToDelete(p.id)}
+                />
               ))}
             </div>
           ) : (
@@ -387,28 +337,14 @@ function MediaCard() {
           )}
 
           <div className="media__actions">
-            <button
-              className="btn btn--neutral"
-              onClick={() => inputRef.current.click()}
-              disabled={uploading}
-            >
-              {uploading ? "Загрузка…" : "Загрузить фото"}
+            <button className="btn btn--neutral" onClick={picker.open} disabled={uploading}>
+              {uploadLabel}
             </button>
             <button className="btn btn--neutral" onClick={() => setAllOpen(true)}>
               Показать всё
             </button>
           </div>
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            hidden
-            onChange={(e) => {
-              upload(e.target.files);
-              e.target.value = "";
-            }}
-          />
+          {picker.input}
         </>
       ) : tab === "albums" ? (
         <AlbumsTab />
@@ -443,37 +379,23 @@ function MediaCard() {
           onClose={() => setAllOpen(false)}
           width={760}
           footer={
-            <button
-              className="btn"
-              onClick={() => inputRef.current.click()}
-              disabled={uploading}
-            >
-              {uploading ? "Загрузка…" : "Загрузить фото"}
+            <button className="btn" onClick={picker.open} disabled={uploading}>
+              {uploadLabel}
             </button>
           }
         >
           {photos.length > 0 ? (
             <div className="photos-all">
               {photos.map((p, i) => (
-                <div key={p.id} className="media__photo">
-                  <button
-                    className="media__photo-open"
-                    style={{ background: bg(p.src, "var(--field-bg)") }}
-                    onClick={() => {
-                      setAllOpen(false);
-                      setViewerIndex(i);
-                    }}
-                    aria-label="Открыть фотографию"
-                  />
-                  <button
-                    className="media__photo-delete"
-                    onClick={() => setToDelete(p.id)}
-                    title="Удалить фотографию"
-                    aria-label="Удалить фотографию"
-                  >
-                    <CloseIcon size={16} />
-                  </button>
-                </div>
+                <PhotoTile
+                  key={p.id}
+                  photo={p}
+                  onOpen={() => {
+                    setAllOpen(false);
+                    setViewerIndex(i);
+                  }}
+                  onDelete={() => setToDelete(p.id)}
+                />
               ))}
             </div>
           ) : (
@@ -551,7 +473,7 @@ function Wall({ posts, postActions }) {
     .filter((p) => p.mine || p.wall)
     .filter((p) => tab === "all" || p.mine)
     .filter((p) => !q || p.text?.toLowerCase().includes(q))
-    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
+    .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
 
   const closeSearch = () => {
     setSearchOpen(false);

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useProfile } from "../context/ProfileContext";
 import { useSnackbar } from "../components/Snackbar";
-import { MONTHS, daysInMonth, relationOptions, validateName } from "../profile";
+import SideMenu from "../components/SideMenu";
+import { INTERESTS, MONTHS, daysInMonth, relationOptions, validateName } from "../profile";
 
 const SECTIONS = [
   { id: "main", label: "Основное" },
@@ -31,6 +32,9 @@ const EDITABLE = [
 
 const pick = (obj) => Object.fromEntries(EDITABLE.map((k) => [k, obj[k]]));
 
+// В телефоне оставляем только цифры, +, скобки, дефис и пробел
+const phoneOnly = (value) => value.replace(/[^\d+()\- ]/g, "");
+
 const THIS_YEAR = new Date().getFullYear();
 const range = (from, to) =>
   Array.from({ length: Math.abs(to - from) + 1 }, (_, i) =>
@@ -48,17 +52,6 @@ const COUNTRIES = [
   "Армения",
   "Грузия",
   "Другая",
-];
-
-const INTERESTS = [
-  ["activities", "Деятельность"],
-  ["interests", "Интересы"],
-  ["music", "Любимая музыка"],
-  ["movies", "Любимые фильмы"],
-  ["books", "Любимые книги"],
-  ["games", "Любимые игры"],
-  ["quotes", "Любимые цитаты"],
-  ["about", "О себе"],
 ];
 
 // ---------- Базовые поля формы ----------
@@ -294,9 +287,7 @@ export default function EditProfile({ onNavigate }) {
                 <Input
                   type="tel"
                   value={draft.contacts.phone}
-                  onChange={(v) =>
-                    setIn("contacts", "phone")(v.replace(/[^\d+()\- ]/g, ""))
-                  }
+                  onChange={(v) => setIn("contacts", "phone")(phoneOnly(v))}
                   placeholder="+7 900 000-00-00"
                   maxLength={20}
                 />
@@ -305,9 +296,7 @@ export default function EditProfile({ onNavigate }) {
                 <Input
                   type="tel"
                   value={draft.contacts.phone2}
-                  onChange={(v) =>
-                    setIn("contacts", "phone2")(v.replace(/[^\d+()\- ]/g, ""))
-                  }
+                  onChange={(v) => setIn("contacts", "phone2")(phoneOnly(v))}
                   maxLength={20}
                 />
               </Row>
@@ -430,24 +419,17 @@ export default function EditProfile({ onNavigate }) {
       </div>
 
       <aside className="columns__side">
-        <div className="card side-menu">
-          {SECTIONS.map((s) => (
-            <div
-              key={s.id}
-              className={`side-menu__item ${section === s.id ? "active" : ""}`}
-              onClick={() => setSection(s.id)}
-            >
-              {s.label}
-            </div>
-          ))}
-          <div className="separator" />
-          <div
-            className="side-menu__item"
-            onClick={() => onNavigate("profile")}
-          >
-            Перейти к профилю
-          </div>
-        </div>
+        <SideMenu
+          items={[
+            ...SECTIONS.map((s) => ({
+              label: s.label,
+              active: section === s.id,
+              onClick: () => setSection(s.id),
+            })),
+            "separator",
+            { label: "Перейти к профилю", onClick: () => onNavigate("profile") },
+          ]}
+        />
       </aside>
     </div>
   );

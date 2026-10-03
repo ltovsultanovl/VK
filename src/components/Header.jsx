@@ -1,4 +1,3 @@
-import { useEffect, useRef, useState } from "react";
 import MeAvatar from "./MeAvatar";
 import {
   BellIcon,
@@ -11,25 +10,15 @@ import {
   SettingsIcon,
 } from "./Icons";
 import { useProfile } from "../context/ProfileContext";
+import { useDropdown } from "../hooks";
 
 export default function Header({ onNavigate, theme, onToggleTheme }) {
   const { name } = useProfile();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef(null);
-
-  // Закрываем меню по клику снаружи
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = (e) => {
-      if (!menuRef.current?.contains(e.target)) setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [menuOpen]);
+  const menu = useDropdown();
 
   const go = (view) => (e) => {
     e.preventDefault();
-    setMenuOpen(false);
+    menu.close();
     onNavigate(view);
   };
 
@@ -58,16 +47,13 @@ export default function Header({ onNavigate, theme, onToggleTheme }) {
 
         <div className="header__spacer" />
 
-        <div className="profile-menu" ref={menuRef}>
-          <button
-            className="header__user"
-            onClick={() => setMenuOpen((o) => !o)}
-          >
+        <div className="profile-menu" ref={menu.ref}>
+          <button className="header__user" onClick={menu.toggle}>
             <MeAvatar size={32} />
             <ChevronDownIcon size={16} />
           </button>
 
-          {menuOpen && (
+          {menu.open && (
             <div className="dropdown">
               <a href="#" className="dropdown__head" onClick={go("profile")}>
                 <MeAvatar size={48} />

@@ -16,6 +16,18 @@ export const relationOptions = (gender) =>
 export const relationLabel = (gender, value) =>
   value && value !== '0' ? (RELATIONS[gender] ?? RELATIONS.male)[+value] : '';
 
+// Поля «Интересов»: порядок и подписи — для формы редактирования и окна «Подробнее»
+export const INTERESTS = [
+  ['activities', 'Деятельность'],
+  ['interests', 'Интересы'],
+  ['music', 'Любимая музыка'],
+  ['movies', 'Любимые фильмы'],
+  ['books', 'Любимые книги'],
+  ['games', 'Любимые игры'],
+  ['quotes', 'Любимые цитаты'],
+  ['about', 'О себе'],
+];
+
 export const fullName = (p) => `${p.firstName} ${p.lastName}`.trim();
 
 export const daysInMonth = (month, year) =>

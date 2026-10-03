@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import Avatar from "./Avatar";
 import MeAvatar from "./MeAvatar";
 import {
@@ -15,20 +15,11 @@ import {
 } from "./Icons";
 import { useSnackbar } from "./Snackbar";
 import { useProfile } from "../context/ProfileContext";
-import { useDismiss } from "../hooks";
-import { formatCount } from "../utils";
+import { useDropdown } from "../hooks";
+import { formatCount, plural } from "../utils";
 
 const TEXT_LIMIT = 300;
 const COMMENTS_PREVIEW = 2;
-
-// plural(5, ["комментарий", "комментария", "комментариев"]) → «комментариев»
-const plural = (n, [one, few, many]) => {
-  const m10 = n % 10;
-  const m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
-  return many;
-};
 
 // Автор «мой» (post.mine / comment.mine) берётся из актуального профиля,
 // чтобы смена имени и аватара сразу отражалась в старых записях
@@ -40,10 +31,7 @@ const useAuthor = (item, fallback) => {
 // ---------- Меню «⋯» ----------
 function PostMenu({ post, onPin, onDelete }) {
   const showSnackbar = useSnackbar();
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  const close = useCallback(() => setOpen(false), []);
-  useDismiss(ref, open, close);
+  const { open, ref, close, toggle } = useDropdown();
 
   const act = (fn) => () => {
     close();
@@ -52,7 +40,7 @@ function PostMenu({ post, onPin, onDelete }) {
 
   return (
     <div className="post__menu" ref={ref}>
-      <button className="icon-btn" title="Действия" onClick={() => setOpen((o) => !o)}>
+      <button className="icon-btn" title="Действия" onClick={toggle}>
         <MoreIcon size={20} />
       </button>
 

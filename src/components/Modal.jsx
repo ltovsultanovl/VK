@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { CloseIcon } from "./Icons";
+import { useScrollLock } from "../hooks";
 
 // Открытые окна по порядку: Esc закрывает только верхнее
 const openModals = [];
@@ -17,7 +18,9 @@ export default function Modal({
     onCloseRef.current = onClose;
   });
 
-  // Esc закрывает окно, прокрутка страницы блокируется
+  useScrollLock();
+
+  // Esc закрывает только верхнее из открытых окон
   useEffect(() => {
     const token = {};
     openModals.push(token);
@@ -25,12 +28,9 @@ export default function Modal({
       if (e.key === "Escape" && openModals.at(-1) === token) onCloseRef.current();
     };
     document.addEventListener("keydown", onKey);
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     return () => {
       openModals.splice(openModals.indexOf(token), 1);
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = overflow;
     };
   }, []);
 

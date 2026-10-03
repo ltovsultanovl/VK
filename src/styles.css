@@ -664,11 +664,17 @@ input, textarea { font: inherit; color: var(--text); }
 .side-menu__item {
   display: flex;
   align-items: center;
+  width: 100%;
   height: 32px;
   padding: 0 10px;
+  border: 0;
   border-radius: 8px;
-  cursor: pointer;
+  background: none;
+  color: var(--text);
+  font-family: inherit;
   font-size: 13px;
+  text-align: left;
+  cursor: pointer;
 }
 .side-menu__item:hover { background: var(--hover); }
 .side-menu__item.active { background: var(--active); font-weight: 500; }

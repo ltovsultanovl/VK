@@ -4,6 +4,7 @@ import AddButton from "./AddButton";
 import MediaEmpty from "./MediaEmpty";
 import { CloseIcon, MusicIcon, PauseIcon, PlayIcon } from "../Icons";
 import { useSnackbar } from "../Snackbar";
+import { useFilePicker } from "../../hooks";
 
 const formatDuration = (sec) =>
   Number.isFinite(sec) ? `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}` : "";
@@ -12,13 +13,12 @@ const formatDuration = (sec) =>
 // Файлы — object URL, поэтому после перезагрузки страницы их нет
 export default function MusicTab({ tracks, onChange }) {
   const showSnackbar = useSnackbar();
-  const inputRef = useRef(null);
   const audioRef = useRef(null);
   const [playingId, setPlayingId] = useState(null);
   const [toDelete, setToDelete] = useState(null);
 
   const add = (files) => {
-    const audio = [...files].filter((f) => f.type.startsWith("audio/"));
+    const audio = files.filter((f) => f.type.startsWith("audio/"));
     if (!audio.length) {
       showSnackbar("Выберите аудиофайл: MP3, M4A, OGG или WAV", "error");
       return;
@@ -41,6 +41,8 @@ export default function MusicTab({ tracks, onChange }) {
     });
     showSnackbar(added.length > 1 ? `Добавлено аудиозаписей: ${added.length}` : "Аудиозапись добавлена");
   };
+
+  const picker = useFilePicker({ accept: "audio/*", multiple: true, onPick: add });
 
   const toggle = (track) => {
     const audio = audioRef.current;
@@ -96,18 +98,8 @@ export default function MusicTab({ tracks, onChange }) {
         <MediaEmpty Icon={MusicIcon}>Аудиозаписей пока нет</MediaEmpty>
       )}
 
-      <AddButton onClick={() => inputRef.current.click()}>Добавить аудиозапись</AddButton>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="audio/*"
-        multiple
-        hidden
-        onChange={(e) => {
-          add(e.target.files);
-          e.target.value = "";
-        }}
-      />
+      <AddButton onClick={picker.open}>Добавить аудиозапись</AddButton>
+      {picker.input}
       <audio ref={audioRef} onEnded={() => setPlayingId(null)} hidden />
 
       {toDelete && (

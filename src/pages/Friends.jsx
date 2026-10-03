@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Avatar from "../components/Avatar";
+import SideMenu from "../components/SideMenu";
 import { MoreIcon, SearchIcon } from "../components/Icons";
 import { people } from "../data";
 
@@ -70,19 +71,7 @@ export default function Friends({ onMessage }) {
       </div>
 
       <aside className="columns__side">
-        <div className="card side-menu">
-          {menu.map(({ label, counter }, i) => (
-            <div
-              key={label}
-              className={`side-menu__item ${i === 0 ? "active" : ""}`}
-            >
-              {label}
-              {counter && (
-                <span className="counter counter--accent">{counter}</span>
-              )}
-            </div>
-          ))}
-        </div>
+        <SideMenu items={menu.map((item, i) => ({ ...item, active: i === 0, accent: true }))} />
       </aside>
     </div>
   );

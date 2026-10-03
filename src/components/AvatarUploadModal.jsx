@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import Modal from "./Modal";
 import { useProfile } from "../context/ProfileContext";
 import { useSnackbar } from "./Snackbar";
 import { readImage } from "../utils";
+import { useFileDrop, useFilePicker } from "../hooks";
 
 // Двухшаговая загрузка, как в VK:
 // 1) «Загрузка новой фотографии» — выбор файла / drag&drop
@@ -10,10 +11,8 @@ import { readImage } from "../utils";
 export default function AvatarUploadModal({ onClose }) {
   const { updateProfile } = useProfile();
   const showSnackbar = useSnackbar();
-  const inputRef = useRef(null);
   const [image, setImage] = useState(null);
   const [error, setError] = useState("");
-  const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleFile = async (file) => {
@@ -27,6 +26,12 @@ export default function AvatarUploadModal({ onClose }) {
       setLoading(false);
     }
   };
+
+  const picker = useFilePicker({
+    accept: "image/jpeg,image/png,image/gif,image/webp",
+    onPick: ([file]) => handleFile(file),
+  });
+  const [dragging, dropProps] = useFileDrop(([file]) => handleFile(file));
 
   const save = () => {
     updateProfile({ avatar: image });
@@ -67,37 +72,16 @@ export default function AvatarUploadModal({ onClose }) {
 
   return (
     <Modal title="Загрузка новой фотографии" onClose={onClose} width={560}>
-      <div
-        className={`dropzone ${dragging ? "dropzone--active" : ""}`}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragging(false);
-          handleFile(e.dataTransfer.files[0]);
-        }}
-      >
+      <div className={`dropzone ${dragging ? "dropzone--active" : ""}`} {...dropProps}>
         <p className="modal__text">
           Друзьям будет проще узнать вас, если вы загрузите свою настоящую фотографию.
           <br />
           Вы можете загрузить изображение в формате JPG, GIF или PNG.
         </p>
-        <button className="btn" onClick={() => inputRef.current.click()} disabled={loading}>
+        <button className="btn" onClick={picker.open} disabled={loading}>
           {loading ? "Загрузка…" : "Выбрать файл"}
         </button>
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/gif,image/webp"
-          hidden
-          onChange={(e) => {
-            handleFile(e.target.files[0]);
-            e.target.value = "";
-          }}
-        />
+        {picker.input}
         {error && <div className="form-row__error">{error}</div>}
         <p className="dropzone__hint">
           Можно перетащить фотографию сюда. Если у вас возникают проблемы с загрузкой, попробуйте выбрать

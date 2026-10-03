@@ -16,19 +16,16 @@ import {
 } from "./Icons";
 import { useSnackbar } from "./Snackbar";
 import { useProfile } from "../context/ProfileContext";
-import { useDismiss } from "../hooks";
+import { useDropdown, useScrollLock } from "../hooks";
 import { formatCount, formatDate } from "../utils";
 
 // ---------- «Ещё» под фото ----------
 function MoreMenu({ photo, onMakeAvatar }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  const close = useCallback(() => setOpen(false), []);
-  useDismiss(ref, open, close);
+  const { open, ref, close, toggle } = useDropdown();
 
   return (
     <div className="viewer__more" ref={ref}>
-      <button className="viewer__link" onClick={() => setOpen((o) => !o)}>
+      <button className="viewer__link" onClick={toggle}>
         Ещё <ChevronDownIcon size={16} />
       </button>
       {open && (
@@ -99,14 +96,7 @@ export default function PhotoViewer({
     return () => document.removeEventListener("keydown", onKey);
   }, [confirming, count, go, onClose]);
 
-  // Блокируем прокрутку страницы под просмотрщиком
-  useEffect(() => {
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = overflow;
-    };
-  }, []);
+  useScrollLock();
 
   if (!photo) return null;
 

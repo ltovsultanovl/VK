@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createElement,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { defaultPhotos } from "./data";
 import { useSnackbar } from "./components/Snackbar";
 
@@ -22,66 +28,88 @@ export function useDismiss(ref, open, onClose) {
   }, [ref, open, onClose]);
 }
 
-const PHOTOS_KEY = "photos";
-
-// Дополняем старые сохранения новыми полями (дата, лайки, комментарии)
-const normalizePhoto = (p) => ({ createdAt: null, likes: 0, liked: false, comments: [], ...p });
-
-const readPhotos = () => {
-  try {
-    const saved = JSON.parse(localStorage.getItem(PHOTOS_KEY));
-    return Array.isArray(saved) ? saved.map(normalizePhoto) : defaultPhotos;
-  } catch {
-    return defaultPhotos;
-  }
-};
-
-// Фотографии профиля, сохраняются в localStorage.
-// saved = false — место в хранилище кончилось, новые фото живут до перезагрузки
-export function usePhotos() {
-  const [photos, setPhotos] = useState(readPhotos);
-  const [saved, setSaved] = useState(true);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(PHOTOS_KEY, JSON.stringify(photos));
-      setSaved(true);
-    } catch {
-      setSaved(false);
-    }
-  }, [photos]);
-
-  const addPhotos = useCallback(
-    (sources) =>
-      setPhotos((list) => [
-        ...sources.map((src) =>
-          normalizePhoto({ id: crypto.randomUUID(), src, createdAt: new Date().toISOString() }),
-        ),
-        ...list,
-      ]),
-    [],
-  );
-
-  const removePhoto = useCallback(
-    (id) => setPhotos((list) => list.filter((p) => p.id !== id)),
-    [],
-  );
-
-  const updatePhoto = useCallback(
-    (id, fn) => setPhotos((list) => list.map((p) => (p.id === id ? fn(p) : p))),
-    [],
-  );
-
-  return { photos, addPhotos, removePhoto, updatePhoto, saved };
+// Выпадающее меню: ref вешается на обёртку (кнопка + меню),
+// клик снаружи и Esc закрывают его
+export function useDropdown() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const close = useCallback(() => setOpen(false), []);
+  const toggle = useCallback(() => setOpen((o) => !o), []);
+  useDismiss(ref, open, close);
+  return { open, ref, close, toggle };
 }
 
-// useState, который переживает перезагрузку страницы (хранится в localStorage)
-export function useStoredState(key, initial) {
+// Блокирует прокрутку страницы, пока компонент на экране (модалки, просмотр фото)
+export function useScrollLock() {
+  useEffect(() => {
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = overflow;
+    };
+  }, []);
+}
+
+// Скрытый <input type="file">: open() открывает диалог выбора,
+// input нужно отрендерить где угодно. onPick получает массив файлов
+export function useFilePicker({ accept, multiple = false, onPick }) {
+  const ref = useRef(null);
+  const onPickRef = useRef(onPick);
+  useEffect(() => {
+    onPickRef.current = onPick;
+  });
+
+  const input = createElement("input", {
+    ref,
+    type: "file",
+    accept,
+    multiple,
+    hidden: true,
+    onChange: (e) => {
+      const files = [...e.target.files];
+      e.target.value = ""; // чтобы тот же файл можно было выбрать ещё раз
+      if (files.length) onPickRef.current(files);
+    },
+  });
+
+  const open = useCallback(() => ref.current?.click(), []);
+  return { open, input };
+}
+
+// Перетаскивание файлов на элемент: [dragging, props] — props вешаются на элемент.
+// relatedTarget-проверка убирает мигание подсветки над дочерними элементами
+export function useFileDrop(onDrop) {
+  const [dragging, setDragging] = useState(false);
+
+  const props = {
+    onDragOver: (e) => {
+      if (![...e.dataTransfer.types].includes("Files")) return;
+      e.preventDefault();
+      setDragging(true);
+    },
+    onDragLeave: (e) => {
+      if (!e.currentTarget.contains(e.relatedTarget)) setDragging(false);
+    },
+    onDrop: (e) => {
+      e.preventDefault();
+      setDragging(false);
+      onDrop([...e.dataTransfer.files]);
+    },
+  };
+
+  return [dragging, props];
+}
+
+// useState, который переживает перезагрузку страницы (хранится в localStorage).
+// revive(saved) — привести старое сохранение к текущему формату данных
+export function useStoredState(key, initial, { revive } = {}) {
   const showSnackbar = useSnackbar();
   const failedRef = useRef(false);
   const [value, setValue] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem(key)) ?? initial;
+      const saved = JSON.parse(localStorage.getItem(key));
+      if (saved == null) return initial;
+      return revive ? revive(saved) : saved;
     } catch {
       return initial;
     }
@@ -99,4 +127,37 @@ export function useStoredState(key, initial) {
   }, [key, value, showSnackbar]);
 
   return [value, setValue];
+}
+
+// ---------- Фото профиля ----------
+
+// Дополняем старые сохранения новыми полями (дата, лайки, комментарии)
+const normalizePhoto = (p) => ({ createdAt: null, likes: 0, liked: false, comments: [], ...p });
+const revivePhotos = (saved) => (Array.isArray(saved) ? saved.map(normalizePhoto) : defaultPhotos);
+
+export function usePhotos() {
+  const [photos, setPhotos] = useStoredState("photos", defaultPhotos, { revive: revivePhotos });
+
+  const addPhotos = useCallback(
+    (sources) =>
+      setPhotos((list) => [
+        ...sources.map((src) =>
+          normalizePhoto({ id: crypto.randomUUID(), src, createdAt: new Date().toISOString() }),
+        ),
+        ...list,
+      ]),
+    [setPhotos],
+  );
+
+  const removePhoto = useCallback(
+    (id) => setPhotos((list) => list.filter((p) => p.id !== id)),
+    [setPhotos],
+  );
+
+  const updatePhoto = useCallback(
+    (id, fn) => setPhotos((list) => list.map((p) => (p.id === id ? fn(p) : p))),
+    [setPhotos],
+  );
+
+  return { photos, addPhotos, removePhoto, updatePhoto };
 }

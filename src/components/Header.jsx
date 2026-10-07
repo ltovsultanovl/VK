@@ -1,44 +1,66 @@
+import { useState } from "react";
 import MeAvatar from "./MeAvatar";
-import {
-  BellIcon,
-  ChevronDownIcon,
-  HelpIcon,
-  LogoutIcon,
-  MoonIcon,
-  MusicIcon,
-  SearchIcon,
-  SettingsIcon,
-} from "./Icons";
+import { BellIcon, ChevronDownIcon, LogoutIcon, MoonIcon, MusicIcon, SearchIcon } from "./Icons";
+import { useSnackbar } from "./Snackbar";
 import { useProfile } from "../context/ProfileContext";
+import { useFriends } from "../context/FriendsContext";
 import { useDropdown } from "../hooks";
+import { explainError, signOut } from "../api";
 
 export default function Header({ onNavigate, theme, onToggleTheme }) {
   const { name } = useProfile();
+  const { incoming } = useFriends();
+  const showSnackbar = useSnackbar();
   const menu = useDropdown();
+  const [query, setQuery] = useState("");
 
-  const go = (view) => (e) => {
+  const go = (path) => (e) => {
     e.preventDefault();
     menu.close();
-    onNavigate(view);
+    onNavigate(path);
+  };
+
+  const search = (e) => {
+    e.preventDefault();
+    onNavigate(`friends/search?q=${encodeURIComponent(query.trim())}`);
+    setQuery("");
+  };
+
+  const logout = async () => {
+    menu.close();
+    try {
+      await signOut();
+    } catch (e) {
+      showSnackbar(explainError(e), "error");
+    }
   };
 
   return (
     <header className="header">
       <div className="header__inner">
-        <a className="logo" href="#" onClick={go("feed")}>
+        <a className="logo" href="#feed" onClick={go("feed")}>
           <span className="logo__mark">VK</span>
           <span className="logo__text">вконтакте</span>
         </a>
 
-        <label className="search">
+        <form className="search" role="search" onSubmit={search}>
           <SearchIcon size={16} />
-          <input type="search" placeholder="Поиск" />
-        </label>
+          <input
+            type="search"
+            placeholder="Поиск: имя или почта"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </form>
 
         <div className="header__actions">
-          <button className="icon-btn" title="Уведомления">
+          <button
+            className="icon-btn"
+            title={incoming.length ? `Заявки в друзья: ${incoming.length}` : "Уведомления"}
+            onClick={() => onNavigate("friends/requests")}
+          >
             <BellIcon size={28} />
-            <span className="badge">1</span>
+            {incoming.length > 0 && <span className="badge">{incoming.length}</span>}
           </button>
           <button className="icon-btn" title="Музыка">
             <MusicIcon size={28} />
@@ -55,7 +77,7 @@ export default function Header({ onNavigate, theme, onToggleTheme }) {
 
           {menu.open && (
             <div className="dropdown">
-              <a href="#" className="dropdown__head" onClick={go("profile")}>
+              <a href="#profile" className="dropdown__head" onClick={go("profile")}>
                 <MeAvatar size={48} />
                 <div>
                   <div className="dropdown__name">{name}</div>
@@ -63,20 +85,12 @@ export default function Header({ onNavigate, theme, onToggleTheme }) {
                 </div>
               </a>
               <div className="separator" />
-              <button className="dropdown__item">
-                <SettingsIcon /> Настройки
-              </button>
               <button className="dropdown__item" onClick={onToggleTheme}>
                 <MoonIcon /> Тема
-                <span className="muted">
-                  {theme === "dark" ? "Тёмная" : "Светлая"}
-                </span>
-              </button>
-              <button className="dropdown__item">
-                <HelpIcon /> Помощь
+                <span className="muted">{theme === "dark" ? "Тёмная" : "Светлая"}</span>
               </button>
               <div className="separator" />
-              <button className="dropdown__item">
+              <button className="dropdown__item" onClick={logout}>
                 <LogoutIcon /> Выйти
               </button>
             </div>

@@ -1,26 +1,37 @@
 import { useEffect, useState } from "react";
 import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
+import Splash from "./components/Splash";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Feed from "./pages/Feed";
 import Profile from "./pages/Profile";
-import Messenger from "./pages/Messenger";
 import OnlineMessenger from "./pages/OnlineMessenger";
-import { useChat } from "./context/ChatContext";
-import { chatEnabled } from "./lib/supabase";
 import Friends from "./pages/Friends";
-import { autoReplies, initialDialogs, initialPosts, people } from "./data";
 import EditProfile from "./pages/EditProfile";
-import ErrorBoundary from "./components/ErrorBoundary";
-import { nowTime } from "./utils";
+import AuthPage from "./pages/AuthPage";
+import SetupNeeded from "./pages/SetupNeeded";
+import NewPassword from "./pages/NewPassword";
+import { useAuth } from "./context/AuthContext";
+import { ProfileProvider, useProfile } from "./context/ProfileContext";
+import { FriendsProvider, useFriends } from "./context/FriendsContext";
+import { ChatProvider, useChat } from "./context/ChatContext";
+import { MediaProvider } from "./context/MediaContext";
+import { supabaseConfigured } from "./lib/supabase";
 import { useStoredState } from "./hooks";
 
 // Тему до отрисовки уже поставил скрипт в index.html (с учётом системной)
 const readTheme = () => document.documentElement.dataset.theme || "light";
 
-const VIEWS = ["feed", "profile", "edit", "messages", "friends"];
-const readView = () => {
-  const hash = window.location.hash.slice(1);
-  return VIEWS.includes(hash) ? hash : "feed";
+// Адрес → экран: #feed, #profile, #user/<id>, #edit, #messages, #friends[/requests|/search?q=…]
+const VIEWS = ["feed", "profile", "user", "edit", "messages", "friends"];
+const readRoute = () => {
+  const [path, search = ""] = decodeURIComponent(window.location.hash.slice(1)).split("?");
+  const [view, param = ""] = path.split("/");
+  return {
+    view: VIEWS.includes(view) ? view : "feed",
+    param,
+    query: new URLSearchParams(search).get("q") ?? "",
+  };
 };
 
 function PageError({ onRetry }) {
@@ -37,165 +48,77 @@ function PageError({ onRetry }) {
   );
 }
 
-export default function App() {
-  const [view, setView] = useState(readView);
-  const [theme, setTheme] = useStoredState("theme", readTheme());
-  const [posts, setPosts] = useState(initialPosts);
-  const [dialogs, setDialogs] = useState(initialDialogs);
-  const [activeDialogId, setActiveDialogId] = useState(initialDialogs[0].id);
+// Приложение для вошедшего пользователя
+function Shell({ theme, onToggleTheme }) {
+  const { myId } = useProfile();
+  const { incoming } = useFriends();
   const chat = useChat();
+  const [route, setRoute] = useState(readRoute);
+
+  useEffect(() => {
+    const onHash = () => {
+      setRoute(readRoute());
+      window.scrollTo(0, 0);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const navigate = (path) => {
+    if (window.location.hash === `#${path}`) setRoute(readRoute());
+    else window.location.hash = path;
+  };
+
+  const { view, param, query } = route;
+  // Своя страница по адресу #user/<мой id> — то же, что #profile
+  const profileId = view === "profile" || (view === "user" && param === myId) ? myId : view === "user" ? param : null;
+
+  return (
+    <>
+      <Header onNavigate={navigate} theme={theme} onToggleTheme={onToggleTheme} />
+      <div className="layout">
+        <Sidebar
+          view={profileId === myId ? "profile" : view}
+          onNavigate={navigate}
+          counters={{ messages: chat.unreadTotal, friends: incoming.length }}
+        />
+        <main className="main">
+          <ErrorBoundary key={`${view}/${param}`} fallback={(reset) => <PageError onRetry={reset} />}>
+            {view === "feed" && <Feed />}
+            {profileId && <Profile key={profileId} userId={profileId} onNavigate={navigate} />}
+            {view === "edit" && <EditProfile onNavigate={navigate} />}
+            {view === "messages" && <OnlineMessenger />}
+            {view === "friends" && <Friends section={param} query={query} onNavigate={navigate} />}
+          </ErrorBoundary>
+        </main>
+      </div>
+    </>
+  );
+}
+
+export default function App() {
+  const { session, recovering, finishRecovery } = useAuth();
+  const [theme, setTheme] = useStoredState("theme", readTheme());
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
-  // Синхронизация страницы с адресом (#feed, #profile, #edit, #messages, #friends)
-  useEffect(() => {
-    const onHash = () => setView(readView());
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, []);
+  if (!supabaseConfigured) return <SetupNeeded />;
+  if (session === undefined) return <Splash />;
+  if (!session) return <AuthPage />;
+  if (recovering) return <NewPassword onDone={finishRecovery} />;
 
-  const navigate = (next) => {
-    setView(next);
-    window.location.hash = next;
-    window.scrollTo(0, 0);
-  };
-
-  // ---------- Посты ----------
-  const updatePost = (id, fn) =>
-    setPosts((list) => list.map((p) => (p.id === id ? fn(p) : p)));
-
-  const postActions = {
-    onLike: (id) =>
-      updatePost(id, (p) => ({
-        ...p,
-        liked: !p.liked,
-        likes: p.likes + (p.liked ? -1 : 1),
-      })),
-    onShare: (id) => updatePost(id, (p) => ({ ...p, reposts: p.reposts + 1 })),
-    onDelete: (id) => setPosts((list) => list.filter((p) => p.id !== id)),
-    // Закреплённой может быть только одна запись
-    onPin: (id) =>
-      setPosts((list) =>
-        list.map((p) => ({ ...p, pinned: p.id === id ? !p.pinned : false })),
-      ),
-    onComment: (id, text) =>
-      updatePost(id, (p) => ({
-        ...p,
-        comments: [
-          ...p.comments,
-          { id: Date.now(), mine: true, text, time: nowTime(), likes: 0 },
-        ],
-      })),
-    onPublish: (text) =>
-      setPosts((list) => [
-        {
-          id: Date.now(),
-          mine: true,
-          time: "только что",
-          text,
-          image: null,
-          likes: 0,
-          liked: false,
-          reposts: 0,
-          views: "1",
-          comments: [],
-        },
-        ...list,
-      ]),
-  };
-
-  // ---------- Сообщения ----------
-  const updateDialog = (id, fn) =>
-    setDialogs((list) => list.map((d) => (d.id === id ? fn(d) : d)));
-
-  const openDialog = (id) => {
-    setActiveDialogId(id);
-    updateDialog(id, (d) => ({ ...d, unread: 0 }));
-  };
-
-  const pushMessage = (id, out, text) => {
-    const time = nowTime();
-    updateDialog(id, (d) => ({
-      ...d,
-      time,
-      messages: [
-        ...d.messages,
-        { id: Date.now() + Math.random(), out, text, time },
-      ],
-    }));
-  };
-
-  const sendMessage = (id, text) => {
-    pushMessage(id, true, text);
-    // Имитация ответа собеседника
-    setTimeout(() => {
-      pushMessage(
-        id,
-        false,
-        autoReplies[Math.floor(Math.random() * autoReplies.length)],
-      );
-    }, 1200);
-  };
-
-  const messageFriend = (personId) => {
-    navigate("messages");
-    // В онлайн-чате только настоящие участники, демо-друзей там нет
-    if (chatEnabled) return;
-    if (dialogs.some((d) => d.id === personId)) {
-      openDialog(personId);
-    } else {
-      const person = people.find((p) => p.id === personId);
-      setDialogs((list) => [
-        { id: personId, person, unread: 0, time: nowTime(), messages: [] },
-        ...list,
-      ]);
-      setActiveDialogId(personId);
-    }
-  };
-
-  const unreadMessages = chatEnabled
-    ? chat.unreadTotal
-    : dialogs.reduce((sum, d) => sum + d.unread, 0);
-
+  // key — при смене аккаунта все данные предыдущего пользователя сбрасываются
   return (
-    <>
-      <Header
-        onNavigate={navigate}
-        theme={theme}
-        onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-      />
-      <div className="layout">
-        <Sidebar
-          view={view}
-          onNavigate={navigate}
-          counters={{ messages: unreadMessages, friends: 1 }}
-        />
-        <main className="main">
-          <ErrorBoundary key={view} fallback={(reset) => <PageError onRetry={reset} />}>
-            {view === "feed" && <Feed posts={posts} postActions={postActions} />}
-            {view === "profile" && (
-              <Profile
-                posts={posts}
-                postActions={postActions}
-                onNavigate={navigate}
-              />
-            )}
-            {view === "edit" && <EditProfile onNavigate={navigate} />}
-            {view === "messages" && chatEnabled && <OnlineMessenger />}
-            {view === "messages" && !chatEnabled && (
-              <Messenger
-                dialogs={dialogs}
-                activeId={activeDialogId}
-                onOpen={openDialog}
-                onSend={sendMessage}
-              />
-            )}
-            {view === "friends" && <Friends onMessage={messageFriend} />}
-          </ErrorBoundary>
-        </main>
-      </div>
-    </>
+    <ProfileProvider key={session.user.id} userId={session.user.id}>
+      <FriendsProvider>
+        <ChatProvider>
+          <MediaProvider>
+            <Shell theme={theme} onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))} />
+          </MediaProvider>
+        </ChatProvider>
+      </FriendsProvider>
+    </ProfileProvider>
   );
 }

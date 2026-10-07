@@ -10,13 +10,12 @@ import {
   MapPinIcon,
   PhoneIcon,
 } from "./Icons";
-import { useProfile } from "../context/ProfileContext";
 import { INTERESTS, formatBirthday, relationLabel } from "../profile";
 
 const join = (...parts) => parts.filter(Boolean).join(", ");
 
-export default function ProfileDetailsModal({ onClose, onEdit }) {
-  const { profile: p } = useProfile();
+// Подробная информация о любом пользователе; onEdit — только для своей страницы
+export default function ProfileDetailsModal({ profile: p, onClose, onEdit }) {
   const { contacts: c, education: e, career: w } = p;
 
   const site = c.site.trim();
@@ -68,9 +67,11 @@ export default function ProfileDetailsModal({ onClose, onEdit }) {
       onClose={onClose}
       width={520}
       footer={
-        <button className="btn btn--secondary" onClick={onEdit}>
-          Редактировать
-        </button>
+        onEdit && (
+          <button className="btn btn--secondary" onClick={onEdit}>
+            Редактировать
+          </button>
+        )
       }
     >
       {main.length === 0 && interests.length === 0 && (

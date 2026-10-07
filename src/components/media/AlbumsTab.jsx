@@ -6,6 +6,7 @@ import MediaEmpty from "./MediaEmpty";
 import { AlbumsIcon, CloseIcon } from "../Icons";
 import { useSnackbar } from "../Snackbar";
 import { useStoredState } from "../../hooks";
+import { useProfile } from "../../context/ProfileContext";
 import { formatDate } from "../../utils";
 
 const TITLE_LIMIT = 64;
@@ -65,7 +66,8 @@ function NewAlbumModal({ onCreate, onClose }) {
 
 export default function AlbumsTab() {
   const showSnackbar = useSnackbar();
-  const [albums, setAlbums] = useStoredState("albums", []);
+  const { myId } = useProfile();
+  const [albums, setAlbums] = useStoredState(`albums:${myId}`, []);
   const [creating, setCreating] = useState(false);
   const [toDelete, setToDelete] = useState(null);
 

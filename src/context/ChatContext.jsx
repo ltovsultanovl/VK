@@ -8,7 +8,17 @@ import {
   useState,
 } from "react";
 import { supabase } from "../lib/supabase";
+import {
+  attachmentKind,
+  explainError,
+  fetchPeople,
+  getChatFileUrls,
+  removeChatFile,
+  trackTitle,
+  uploadChatFile,
+} from "../api";
 import { useProfile } from "./ProfileContext";
+import { useFriends } from "./FriendsContext";
 import { useSnackbar } from "../components/Snackbar";
 
 const ChatContext = createContext(null);
@@ -16,36 +26,6 @@ const ChatContext = createContext(null);
 const TYPING_TIMEOUT = 3500; // столько держится «печатает…» после последнего нажатия
 const TYPING_THROTTLE = 2000; // не чаще раза в 2 с шлём «я печатаю»
 const MESSAGES_LIMIT = 1000;
-
-// Понятные подсказки к частым ошибкам настройки Supabase
-const explain = (error) => {
-  const text = error?.message ?? String(error);
-  if (/anonymous/i.test(text)) {
-    return "В Supabase выключен анонимный вход. Включите: Authentication → Sign In / Providers → Allow anonymous sign-ins.";
-  }
-  if (/relation .* does not exist|schema cache/i.test(text)) {
-    return "В базе нет таблиц чата. Выполните скрипт supabase/schema.sql в SQL Editor.";
-  }
-  if (/fetch|network/i.test(text)) {
-    return "Нет связи с Supabase. Проверьте интернет (или VPN) и адрес проекта в .env.local.";
-  }
-  return text;
-};
-
-// Одна сессия на вкладку: StrictMode запускает эффект дважды,
-// и без этого два параллельных signInAnonymously создали бы двух пользователей
-let sessionPromise = null;
-const ensureSession = () =>
-  (sessionPromise ??= (async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session) return session;
-    const { data, error } = await supabase.auth.signInAnonymously();
-    if (error) throw error;
-    return data.session;
-  })().catch((e) => {
-    sessionPromise = null; // чтобы «Повторить» попробовало ещё раз
-    throw e;
-  }));
 
 const upsertById = (list, row) => {
   const i = list.findIndex((m) => m.id === row.id);
@@ -57,33 +37,52 @@ const upsertById = (list, row) => {
 
 const byTime = (a, b) => new Date(a.created_at) - new Date(b.created_at);
 
-// Онлайн-чат на Supabase: анонимный вход, профили, личные сообщения,
-// «в сети» (presence) и «печатает…» (broadcast) в реальном времени
+// Короткое описание сообщения — для уведомлений и списка чатов
+const ATTACHMENT_SUMMARY = { image: "📷 Фотография", video: "🎬 Видео", audio: "🎵 Аудиозапись" };
+export const messageSummary = (m) =>
+  m.text ||
+  (m.attachment_type === "audio" && m.attachment_name ? `🎵 ${m.attachment_name}` : ATTACHMENT_SUMMARY[m.attachment_type] ?? "");
+
+// Личные сообщения в реальном времени: переписки, «в сети» (presence),
+// «печатает…» (broadcast), прочитано/не прочитано
 export function ChatProvider({ children }) {
-  const { profile, name } = useProfile();
+  const { myId } = useProfile();
+  const { friends } = useFriends();
   const showSnackbar = useSnackbar();
 
-  const [status, setStatus] = useState(supabase ? "connecting" : "disabled");
+  const [status, setStatus] = useState("connecting"); // connecting | ready | error
   const [error, setError] = useState("");
-  const [myId, setMyId] = useState(null);
-  const [profiles, setProfiles] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [people, setPeople] = useState({}); // id → person: собеседники, которых нет в друзьях
   const [onlineIds, setOnlineIds] = useState(() => new Set());
   const [typingIds, setTypingIds] = useState(() => new Set());
+  const [activePeerId, setActivePeerId] = useState(null);
+  const [fileUrls, setFileUrls] = useState({}); // путь вложения → временная ссылка
+  const requestedUrls = useRef(new Set());
   const [attempt, setAttempt] = useState(0);
 
   const presenceRef = useRef(null);
   const typingTimers = useRef({});
   const lastTypingSent = useRef(0);
-  const namesRef = useRef({});
-
+  const peopleRef = useRef(people);
   useEffect(() => {
-    namesRef.current = Object.fromEntries(profiles.map((p) => [p.id, p.name]));
-  }, [profiles]);
+    peopleRef.current = people;
+  });
+
+  // Подгружаем профили собеседников, которых ещё не знаем
+  const loadPeople = useCallback(async (ids) => {
+    const missing = [...new Set(ids)].filter((id) => id && !peopleRef.current[id]);
+    if (!missing.length) return;
+    try {
+      const list = await fetchPeople(missing);
+      setPeople((map) => ({ ...map, ...Object.fromEntries(list.map((p) => [p.id, p])) }));
+    } catch {
+      /* без имени собеседника переписка всё равно видна — повторим при следующем сообщении */
+    }
+  }, []);
 
   // ---------- Подключение ----------
   useEffect(() => {
-    if (!supabase) return;
     let cancelled = false;
     const channels = [];
 
@@ -91,59 +90,43 @@ export function ChatProvider({ children }) {
       setStatus("connecting");
       setError("");
       try {
-        const session = await ensureSession();
-        if (cancelled) return;
-        const me = session.user.id;
-
-        // Профиль нужен до сообщений: на него ссылаются внешние ключи
-        const { error: profileError } = await supabase
-          .from("profiles")
-          .upsert({ id: me, name, color: profile.color, avatar: profile.avatar });
-        if (profileError) throw profileError;
-
-        const [profilesRes, messagesRes] = await Promise.all([
-          supabase.from("profiles").select("id, name, color, avatar"),
-          supabase
-            .from("messages")
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(MESSAGES_LIMIT),
-        ]);
-        if (profilesRes.error) throw profilesRes.error;
-        if (messagesRes.error) throw messagesRes.error;
+        const { data, error } = await supabase
+          .from("messages")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(MESSAGES_LIMIT);
+        if (error) throw error;
         if (cancelled) return;
 
-        setMyId(me);
-        setProfiles(profilesRes.data);
-        setMessages(messagesRes.data.sort(byTime));
+        setMessages(data.sort(byTime));
+        await loadPeople(data.map((m) => (m.sender_id === myId ? m.recipient_id : m.sender_id)));
 
-        // Новые и прочитанные сообщения, новые участники
+        // Новые и прочитанные сообщения
         channels.push(
           supabase
-            .channel("db-changes")
+            .channel("messages")
             .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, ({ new: row }) => {
               if (!row?.id) return;
               setMessages((list) => upsertById(list, row).sort(byTime));
-              const incoming = row.recipient_id === me && !row.read_at;
-              if (incoming && location.hash !== "#messages") {
-                const from = namesRef.current[row.sender_id] ?? "Новое сообщение";
-                showSnackbar(`${from}: ${row.text.slice(0, 60)}`, "info");
+              const peer = row.sender_id === myId ? row.recipient_id : row.sender_id;
+              loadPeople([peer]);
+              const incoming = row.recipient_id === myId && !row.read_at;
+              if (incoming && !location.hash.startsWith("#messages")) {
+                const from = peopleRef.current[row.sender_id]?.name ?? "Новое сообщение";
+                showSnackbar(`${from}: ${messageSummary(row).slice(0, 60)}`, "info");
               }
-            })
-            .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, ({ new: row }) => {
-              if (row?.id) setProfiles((list) => upsertById(list, row));
             })
             .subscribe(),
         );
 
         // Кто в сети и кто печатает
-        const presence = supabase.channel("online", { config: { presence: { key: me } } });
+        const presence = supabase.channel("online", { config: { presence: { key: myId } } });
         presence
           .on("presence", { event: "sync" }, () => {
             setOnlineIds(new Set(Object.keys(presence.presenceState())));
           })
           .on("broadcast", { event: "typing" }, ({ payload }) => {
-            if (payload?.to !== me) return;
+            if (payload?.to !== myId) return;
             const from = payload.from;
             setTypingIds((ids) => new Set(ids).add(from));
             clearTimeout(typingTimers.current[from]);
@@ -164,7 +147,7 @@ export function ChatProvider({ children }) {
         setStatus("ready");
       } catch (e) {
         if (cancelled) return;
-        setError(explain(e));
+        setError(explainError(e));
         setStatus("error");
       }
     };
@@ -177,48 +160,57 @@ export function ChatProvider({ children }) {
       presenceRef.current = null;
       Object.values(typingTimers.current).forEach(clearTimeout);
     };
-    // Переподключаемся только по кнопке «Повторить» — профиль обновляется отдельным эффектом
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attempt]);
-
-  // ---------- Имя, цвет и аватар в чате следуют за профилем ----------
-  useEffect(() => {
-    if (status !== "ready" || !myId) return;
-    supabase
-      .from("profiles")
-      .update({ name, color: profile.color, avatar: profile.avatar, updated_at: new Date().toISOString() })
-      .eq("id", myId)
-      .then(({ error }) => error && showSnackbar(explain(error), "error"));
-  }, [status, myId, name, profile.color, profile.avatar, showSnackbar]);
+  }, [myId, attempt, loadPeople, showSnackbar]);
 
   // ---------- Действия ----------
+  // file — фото, видео или музыка (необязательно). Сначала грузим файл, потом создаём сообщение
   const sendMessage = useCallback(
-    async (to, text) => {
-      // Сразу показываем сообщение с часиками, после ответа сервера — меняем на настоящее
+    async (to, text, file = null) => {
+      // Сразу показываем сообщение с часиками (и превью файла), после ответа сервера — настоящее
       const tempId = `tmp-${crypto.randomUUID()}`;
-      const temp = {
-        id: tempId,
-        sender_id: myId,
-        recipient_id: to,
-        text,
-        created_at: new Date().toISOString(),
-        read_at: null,
-        pending: true,
-      };
-      setMessages((list) => [...list, temp]);
+      const localUrl = file ? URL.createObjectURL(file) : null;
+      const attachmentType = file ? attachmentKind(file) : null;
+      setMessages((list) => [
+        ...list,
+        {
+          id: tempId,
+          sender_id: myId,
+          recipient_id: to,
+          text,
+          attachment_type: attachmentType,
+          attachment_name: attachmentType === "audio" ? trackTitle(file.name) : null,
+          localUrl,
+          file,
+          created_at: new Date().toISOString(),
+          read_at: null,
+          pending: true,
+        },
+      ]);
 
-      const { data, error } = await supabase
-        .from("messages")
-        .insert({ recipient_id: to, text })
-        .select()
-        .single();
+      let uploaded = null;
+      try {
+        if (file) uploaded = await uploadChatFile(myId, to, file);
+        const { data, error } = await supabase
+          .from("messages")
+          .insert({
+            recipient_id: to,
+            text,
+            attachment_path: uploaded?.path ?? null,
+            attachment_type: uploaded?.type ?? null,
+            attachment_name: uploaded?.name ?? null,
+          })
+          .select()
+          .single();
+        if (error) throw error;
 
-      if (error) {
+        // Своё вложение показываем по локальной ссылке — без лишней загрузки
+        if (uploaded && localUrl) setFileUrls((urls) => ({ ...urls, [uploaded.path]: localUrl }));
+        setMessages((list) => upsertById(list.filter((m) => m.id !== tempId), data).sort(byTime));
+      } catch (e) {
+        if (uploaded) removeChatFile(uploaded.path).catch(() => {}); // файл без сообщения не нужен
         setMessages((list) => list.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m)));
-        showSnackbar(`Сообщение не отправлено: ${explain(error)}`, "error");
-        return;
+        showSnackbar(`Сообщение не отправлено: ${explainError(e)}`, "error");
       }
-      setMessages((list) => upsertById(list.filter((m) => m.id !== tempId), data).sort(byTime));
     },
     [myId, showSnackbar],
   );
@@ -226,10 +218,23 @@ export function ChatProvider({ children }) {
   const retryMessage = useCallback(
     (message) => {
       setMessages((list) => list.filter((m) => m.id !== message.id));
-      sendMessage(message.recipient_id, message.text);
+      if (message.localUrl) URL.revokeObjectURL(message.localUrl);
+      sendMessage(message.recipient_id, message.text, message.file);
     },
     [sendMessage],
   );
+
+  // Временные ссылки на вложения: запрашиваем для новых сообщений пачкой
+  useEffect(() => {
+    const missing = messages
+      .map((m) => m.attachment_path)
+      .filter((path) => path && !fileUrls[path] && !requestedUrls.current.has(path));
+    if (!missing.length) return;
+    missing.forEach((path) => requestedUrls.current.add(path));
+    getChatFileUrls(missing)
+      .then((urls) => setFileUrls((prev) => ({ ...prev, ...urls })))
+      .catch(() => missing.forEach((path) => requestedUrls.current.delete(path)));
+  }, [messages, fileUrls]);
 
   const markRead = useCallback(
     async (peerId) => {
@@ -259,12 +264,23 @@ export function ChatProvider({ children }) {
     [myId],
   );
 
+  // «Написать сообщение» со страницы человека: открываем чат с ним, даже если переписки ещё нет
+  const openChat = useCallback(
+    (person) => {
+      setPeople((map) => (map[person.id] ? map : { ...map, [person.id]: person }));
+      setActivePeerId(person.id);
+    },
+    [],
+  );
+
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
-  // ---------- Диалоги: все участники, кроме меня, с их перепиской ----------
+  // ---------- Диалоги: друзья + все, с кем есть переписка ----------
   const dialogs = useMemo(() => {
-    if (!myId) return [];
-    return profiles
+    const contacts = new Map(Object.entries(people));
+    friends.forEach((f) => contacts.set(f.id, f));
+
+    return [...contacts.values()]
       .filter((p) => p.id !== myId)
       .map((person) => {
         const thread = messages.filter(
@@ -285,7 +301,7 @@ export function ChatProvider({ children }) {
         if (a.last || b.last) return a.last ? -1 : 1;
         return Number(b.person.online) - Number(a.person.online);
       });
-  }, [profiles, messages, myId, onlineIds, typingIds]);
+  }, [people, friends, messages, myId, onlineIds, typingIds]);
 
   const unreadTotal = dialogs.reduce((sum, d) => sum + d.unread, 0);
 
@@ -295,14 +311,19 @@ export function ChatProvider({ children }) {
       error,
       myId,
       dialogs,
+      fileUrls,
       unreadTotal,
+      onlineIds,
+      activePeerId,
+      setActivePeerId,
+      openChat,
       sendMessage,
       retryMessage,
       markRead,
       sendTyping,
       retry,
     }),
-    [status, error, myId, dialogs, unreadTotal, sendMessage, retryMessage, markRead, sendTyping, retry],
+    [status, error, myId, dialogs, fileUrls, unreadTotal, onlineIds, activePeerId, openChat, sendMessage, retryMessage, markRead, sendTyping, retry],
   );
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

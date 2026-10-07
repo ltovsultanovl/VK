@@ -1,13 +1,13 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import Avatar from "../components/Avatar";
-import MeAvatar from "../components/MeAvatar";
 import Composer from "../components/Composer";
-import Post from "../components/Post";
+import PostList from "../components/PostList";
 import Modal from "../components/Modal";
 import AvatarUploadModal from "../components/AvatarUploadModal";
 import ProfileDetailsModal from "../components/ProfileDetailsModal";
 import PhotoViewer from "../components/PhotoViewer";
 import ConfirmModal from "../components/ConfirmModal";
+import FriendButton from "../components/FriendButton";
 import AlbumsTab from "../components/media/AlbumsTab";
 import MusicTab from "../components/media/MusicTab";
 import VideoTab from "../components/media/VideoTab";
@@ -17,12 +17,11 @@ import {
   AlbumsIcon,
   ArticlesIcon,
   CameraIcon,
-  ChevronDownIcon,
-  ClipsIcon,
   CloseIcon,
   EducationIcon,
   InfoIcon,
   MapPinIcon,
+  MessageIcon,
   MusicIcon,
   PhotoIcon,
   PlusIcon,
@@ -31,81 +30,118 @@ import {
   VideoIcon,
 } from "../components/Icons";
 import { useProfile } from "../context/ProfileContext";
+import { useFriends } from "../context/FriendsContext";
+import { useChat } from "../context/ChatContext";
 import { useMedia } from "../context/MediaContext";
-import { bg, communities, people } from "../data";
-import { formatEducation } from "../profile";
-import { useDismiss, useDropdown, useFileDrop, useFilePicker, usePhotos } from "../hooks";
+import { bg } from "../data";
+import { formatEducation, fullName } from "../profile";
+import { useDismiss, useDropdown, useFileDrop, useFilePicker } from "../hooks";
+import { useFriendsOf, usePhotos, usePosts, useUserProfile } from "../resources";
+import { explainError, removeImage, uploadImage } from "../api";
 import { readImage } from "../utils";
 
 const DEFAULT_COVER = "var(--cover-empty)";
 const STATUS_LIMIT = 140;
 
+// Удаляем старый файл аватара/обложки, только если он лежит в своей папке
+// (аватаром может быть фото из альбома — его трогать нельзя)
+const removeOld = (url, folder) => url?.includes(`/${folder}/`) && removeImage(url).catch(() => {});
+
 // ---------- Обложка ----------
-function Cover() {
-  const { profile, updateProfile } = useProfile();
+function Cover({ profile, editable }) {
+  const { myId, updateProfile } = useProfile();
   const showSnackbar = useSnackbar();
   const menu = useDropdown();
+  const [uploading, setUploading] = useState(false);
   const picker = useFilePicker({ accept: "image/*", onPick: ([file]) => upload(file) });
 
   const upload = async (file) => {
+    setUploading(true);
     try {
-      updateProfile({ cover: await readImage(file, { max: 1600 }) });
-      showSnackbar("Обложка обновлена");
+      const dataUrl = await readImage(file, { max: 1600 });
+      const { url } = await uploadImage(myId, dataUrl, "covers");
+      const old = profile.cover;
+      if (await updateProfile({ cover: url })) {
+        removeOld(old, "covers");
+        showSnackbar("Обложка обновлена");
+      }
     } catch (e) {
-      showSnackbar(e.message, "error");
+      showSnackbar(explainError(e), "error");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const remove = async () => {
+    const old = profile.cover;
+    if (await updateProfile({ cover: null })) {
+      removeOld(old, "covers");
+      showSnackbar("Обложка удалена");
     }
   };
 
   return (
     <div
       className="profile-cover"
-      style={{
-        background: profile.cover
-          ? bg(profile.cover, DEFAULT_COVER)
-          : DEFAULT_COVER,
-      }}
+      style={{ background: profile.cover ? bg(profile.cover, DEFAULT_COVER) : DEFAULT_COVER }}
     >
-      <div className="profile-cover__action" ref={menu.ref}>
-        <button className="btn btn--overlay" onClick={menu.toggle}>
-          <CameraIcon size={20} /> Изменить обложку
-        </button>
-        {menu.open && (
-          <div className="dropdown dropdown--right">
-            <button
-              className="dropdown__item"
-              onClick={() => {
-                menu.close();
-                picker.open();
-              }}
-            >
-              <PhotoIcon /> Загрузить изображение
-            </button>
-            {profile.cover && (
+      {editable && (
+        <div className="profile-cover__action" ref={menu.ref}>
+          <button className="btn btn--overlay" onClick={menu.toggle} disabled={uploading}>
+            <CameraIcon size={20} /> {uploading ? "Загрузка…" : "Изменить обложку"}
+          </button>
+          {menu.open && (
+            <div className="dropdown dropdown--right">
               <button
                 className="dropdown__item"
                 onClick={() => {
                   menu.close();
-                  updateProfile({ cover: null });
-                  showSnackbar("Обложка удалена");
+                  picker.open();
                 }}
               >
-                <TrashIcon /> Удалить обложку
+                <PhotoIcon /> Загрузить изображение
               </button>
-            )}
-          </div>
-        )}
-        {picker.input}
-      </div>
+              {profile.cover && (
+                <button
+                  className="dropdown__item"
+                  onClick={() => {
+                    menu.close();
+                    remove();
+                  }}
+                >
+                  <TrashIcon /> Удалить обложку
+                </button>
+              )}
+            </div>
+          )}
+          {picker.input}
+        </div>
+      )}
     </div>
   );
 }
 
-// ---------- Аватар с меню при наведении ----------
-function ProfileAvatar() {
-  const { profile, updateProfile } = useProfile();
+// ---------- Аватар: свой — с меню, чужой — просто фото и «в сети» ----------
+function ProfileAvatar({ profile, editable }) {
+  const { updateProfile } = useProfile();
+  const { onlineIds } = useChat();
   const showSnackbar = useSnackbar();
   const menu = useDropdown();
   const [modal, setModal] = useState(null); // 'upload' | 'delete'
+
+  if (!editable) {
+    return (
+      <div className="profile-info__avatar">
+        <Avatar
+          name={fullName(profile)}
+          color={profile.color}
+          src={profile.avatar}
+          size={148}
+          online={onlineIds.has(profile.id)}
+        />
+      </div>
+    );
+  }
 
   const open = (name) => {
     menu.close();
@@ -115,7 +151,7 @@ function ProfileAvatar() {
   return (
     <div className="profile-info__avatar" ref={menu.ref}>
       <button className="avatar-edit" onClick={menu.toggle} title="Изменить фотографию">
-        <MeAvatar size={148} />
+        <Avatar name={fullName(profile)} color={profile.color} src={profile.avatar} size={148} />
         <span className="avatar-edit__overlay">
           <CameraIcon size={28} />
         </span>
@@ -142,18 +178,19 @@ function ProfileAvatar() {
         </div>
       )}
 
-      {modal === "upload" && (
-        <AvatarUploadModal onClose={() => setModal(null)} />
-      )}
+      {modal === "upload" && <AvatarUploadModal onClose={() => setModal(null)} />}
 
       {modal === "delete" && (
         <ConfirmModal
           title="Удаление фотографии"
           text="Вы действительно хотите удалить фотографию?"
-          onConfirm={() => {
-            updateProfile({ avatar: null });
+          onConfirm={async () => {
             setModal(null);
-            showSnackbar("Фотография удалена");
+            const old = profile.avatar;
+            if (await updateProfile({ avatar: null })) {
+              removeOld(old, "avatars");
+              showSnackbar("Фотография удалена");
+            }
           }}
           onClose={() => setModal(null)}
         />
@@ -162,24 +199,28 @@ function ProfileAvatar() {
   );
 }
 
-// ---------- Статус: редактирование по клику ----------
-function Status() {
-  const { profile, updateProfile } = useProfile();
+// ---------- Статус: свой редактируется по клику ----------
+function Status({ profile, editable }) {
+  const { updateProfile } = useProfile();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(profile.status);
   const ref = useRef(null);
   const cancel = useCallback(() => setEditing(false), []);
   useDismiss(ref, editing, cancel);
 
+  if (!editable) {
+    return profile.status ? <div className="profile-info__status">{profile.status}</div> : null;
+  }
+
   const start = () => {
     setValue(profile.status);
     setEditing(true);
   };
 
-  const save = (e) => {
+  const save = async (e) => {
     e.preventDefault();
-    updateProfile({ status: value.trim() });
     setEditing(false);
+    await updateProfile({ status: value.trim() });
   };
 
   if (!editing) {
@@ -215,17 +256,17 @@ function Status() {
   );
 }
 
-// ---------- Медиа: фото, альбомы, музыка… ----------
+// ---------- Медиа: фото (с сервера) и личные вкладки (только на своей странице) ----------
 const MEDIA_TABS = [
   { id: "photos", label: "Фото", Icon: PhotoIcon },
-  { id: "albums", label: "Альбомы", Icon: AlbumsIcon },
-  { id: "music", label: "Музыка", Icon: MusicIcon },
-  { id: "video", label: "Видео", Icon: VideoIcon },
-  { id: "articles", label: "Статьи", Icon: ArticlesIcon },
+  { id: "albums", label: "Альбомы", Icon: AlbumsIcon, own: true },
+  { id: "music", label: "Музыка", Icon: MusicIcon, own: true },
+  { id: "video", label: "Видео", Icon: VideoIcon, own: true },
+  { id: "articles", label: "Статьи", Icon: ArticlesIcon, own: true },
 ];
 const PHOTOS_PREVIEW = 6;
 
-// Плитка фото: клик открывает просмотр, ✕ в углу — удаление
+// Плитка фото: клик открывает просмотр, ✕ в углу — удаление (только своих)
 function PhotoTile({ photo, onOpen, onDelete }) {
   return (
     <div className="media__photo">
@@ -235,27 +276,31 @@ function PhotoTile({ photo, onOpen, onDelete }) {
         onClick={onOpen}
         aria-label="Открыть фотографию"
       />
-      <button
-        className="media__photo-delete"
-        onClick={onDelete}
-        title="Удалить фотографию"
-        aria-label="Удалить фотографию"
-      >
-        <CloseIcon size={16} />
-      </button>
+      {onDelete && (
+        <button
+          className="media__photo-delete"
+          onClick={onDelete}
+          title="Удалить фотографию"
+          aria-label="Удалить фотографию"
+        >
+          <CloseIcon size={16} />
+        </button>
+      )}
     </div>
   );
 }
 
-function MediaCard() {
+function MediaCard({ owner, isMe }) {
   const showSnackbar = useSnackbar();
-  const { photos, addPhotos, removePhoto, updatePhoto } = usePhotos();
+  const album = usePhotos(owner.id);
+  const { photos } = album;
   const [tab, setTab] = useState("photos");
   const [allOpen, setAllOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(null);
   const [toDelete, setToDelete] = useState(null);
   const { tracks, setTracks, videos, setVideos } = useMedia();
+  const tabs = MEDIA_TABS.filter((t) => isMe || !t.own);
   const visible = photos.slice(0, PHOTOS_PREVIEW);
 
   const upload = async (files) => {
@@ -265,41 +310,31 @@ function MediaCard() {
       return;
     }
     setUploading(true);
-    const results = await Promise.allSettled(
-      images.map((file) => readImage(file, { max: 1000, quality: 0.8 })),
-    );
+    setTab("photos");
+    const { added, failed, error } = await album.upload(images);
     setUploading(false);
 
-    const added = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
-    const failed = results.length - added.length;
-    if (added.length) {
-      addPhotos(added);
-      setTab("photos");
-    }
-    if (failed && added.length) {
-      showSnackbar(`Загружено ${added.length} из ${results.length}: часть файлов не удалось прочитать`, "error");
+    if (failed && added) {
+      showSnackbar(`Загружено ${added} из ${images.length}: ${error}`, "error");
     } else if (failed) {
-      showSnackbar(results[0].reason.message, "error");
+      showSnackbar(error, "error");
     } else {
-      showSnackbar(
-        added.length > 1 ? `Загружено фотографий: ${added.length}` : "Фотография загружена",
-      );
+      showSnackbar(added > 1 ? `Загружено фотографий: ${added}` : "Фотография загружена");
     }
-  };
-
-  const remove = (id) => {
-    removePhoto(id);
-    showSnackbar("Фотография удалена");
   };
 
   const picker = useFilePicker({ accept: "image/*", multiple: true, onPick: upload });
   const [dragOver, dropProps] = useFileDrop(upload);
   const uploadLabel = uploading ? "Загрузка…" : "Загрузить фото";
+  const askDelete = isMe ? (photo) => () => setToDelete(photo) : () => null;
 
   return (
-    <section className={`card media ${dragOver ? "media--drag" : ""}`} {...dropProps}>
+    <section
+      className={`card media ${dragOver && isMe ? "media--drag" : ""}`}
+      {...(isMe ? dropProps : {})}
+    >
       <div className="media__tabs" role="tablist">
-        {MEDIA_TABS.map(({ id, label, Icon }) => (
+        {tabs.map(({ id, label, Icon }) => (
           <button
             key={id}
             role="tab"
@@ -309,42 +344,52 @@ function MediaCard() {
           >
             <Icon size={20} />
             {label}
-            {id === "photos" && photos.length > 0 && (
-              <span className="media__count">{photos.length}</span>
-            )}
+            {id === "photos" && photos.length > 0 && <span className="media__count">{photos.length}</span>}
           </button>
         ))}
       </div>
 
       {tab === "photos" ? (
         <>
-          {photos.length > 0 ? (
+          {album.loading && !album.data ? (
+            <div className="media__empty" role="status">
+              <div className="chat-status__spinner" />
+            </div>
+          ) : album.error && !album.data ? (
+            <div className="media__empty" role="alert">
+              Не удалось загрузить фото: {album.error}
+              <button className="btn btn--neutral" onClick={album.reload}>
+                Повторить
+              </button>
+            </div>
+          ) : photos.length > 0 ? (
             <div className="media__photos">
               {visible.map((p, i) => (
-                <PhotoTile
-                  key={p.id}
-                  photo={p}
-                  onOpen={() => setViewerIndex(i)}
-                  onDelete={() => setToDelete(p.id)}
-                />
+                <PhotoTile key={p.id} photo={p} onOpen={() => setViewerIndex(i)} onDelete={askDelete(p)} />
               ))}
             </div>
           ) : (
             <div className="media__empty">
               <PhotoIcon size={32} />
-              Здесь пока нет фотографий — загрузите первую или перетащите файлы сюда
+              {isMe
+                ? "Здесь пока нет фотографий — загрузите первую или перетащите файлы сюда"
+                : `${owner.firstName} пока не добавил(а) фотографии`}
             </div>
           )}
 
-          <div className="media__actions">
-            <button className="btn btn--neutral" onClick={picker.open} disabled={uploading}>
-              {uploadLabel}
-            </button>
-            <button className="btn btn--neutral" onClick={() => setAllOpen(true)}>
-              Показать всё
-            </button>
-          </div>
-          {picker.input}
+          {(isMe || photos.length > PHOTOS_PREVIEW) && (
+            <div className={`media__actions ${isMe ? "" : "media__actions--single"}`}>
+              {isMe && (
+                <button className="btn btn--neutral" onClick={picker.open} disabled={uploading}>
+                  {uploadLabel}
+                </button>
+              )}
+              <button className="btn btn--neutral" onClick={() => setAllOpen(true)}>
+                Показать всё
+              </button>
+            </div>
+          )}
+          {isMe && picker.input}
         </>
       ) : tab === "albums" ? (
         <AlbumsTab />
@@ -356,16 +401,19 @@ function MediaCard() {
         <ArticlesTab />
       )}
 
-      {dragOver && <div className="media__drop">Отпустите, чтобы загрузить фото</div>}
+      {dragOver && isMe && <div className="media__drop">Отпустите, чтобы загрузить фото</div>}
 
-      {viewerIndex !== null && (
+      {viewerIndex !== null && photos[viewerIndex] && (
         <PhotoViewer
           photos={photos}
           index={viewerIndex}
+          owner={owner}
           onIndexChange={setViewerIndex}
           onClose={() => setViewerIndex(null)}
-          onDelete={remove}
-          onUpdate={updatePhoto}
+          onDelete={album.remove}
+          onToggleLike={album.toggleLike}
+          onComment={album.comment}
+          onDeleteComment={album.deleteComment}
         />
       )}
 
@@ -373,15 +421,17 @@ function MediaCard() {
         <Modal
           title={
             <>
-              Фотографии <span className="muted">{photos.length}</span>
+              Фотографии · {owner.name} <span className="muted">{photos.length}</span>
             </>
           }
           onClose={() => setAllOpen(false)}
           width={760}
           footer={
-            <button className="btn" onClick={picker.open} disabled={uploading}>
-              {uploadLabel}
-            </button>
+            isMe && (
+              <button className="btn" onClick={picker.open} disabled={uploading}>
+                {uploadLabel}
+              </button>
+            )
           }
         >
           {photos.length > 0 ? (
@@ -394,7 +444,7 @@ function MediaCard() {
                     setAllOpen(false);
                     setViewerIndex(i);
                   }}
-                  onDelete={() => setToDelete(p.id)}
+                  onDelete={askDelete(p)}
                 />
               ))}
             </div>
@@ -412,7 +462,7 @@ function MediaCard() {
           title="Удаление фотографии"
           text="Вы действительно хотите удалить эту фотографию?"
           onConfirm={() => {
-            remove(toDelete);
+            album.remove(toDelete);
             setToDelete(null);
           }}
           onClose={() => setToDelete(null)}
@@ -423,16 +473,18 @@ function MediaCard() {
 }
 
 // ---------- «Создать пост»: свёрнутая кнопка раскрывается в редактор ----------
-function CreatePost({ onPublish }) {
+function CreatePost({ owner, isMe, onPublish }) {
   const [open, setOpen] = useState(false);
 
   if (open) {
     return (
       <Composer
         autoFocus
-        onPublish={(text) => {
-          onPublish(text);
-          setOpen(false);
+        placeholder={isMe ? "Что у вас нового?" : "Напишите что-нибудь на стене…"}
+        onPublish={async (data) => {
+          const ok = await onPublish({ ownerId: owner.id, ...data });
+          if (ok) setOpen(false);
+          return ok;
         }}
         onCancel={() => setOpen(false)}
       />
@@ -443,14 +495,7 @@ function CreatePost({ onPublish }) {
     <div className="card create-post">
       <button className="create-post__main" onClick={() => setOpen(true)}>
         <PlusIcon size={22} />
-        Создать пост
-      </button>
-      <span className="create-post__divider" />
-      <button className="icon-btn" title="Клип">
-        <ClipsIcon />
-      </button>
-      <button className="icon-btn" title="Статья">
-        <ArticlesIcon />
+        {isMe ? "Создать пост" : "Написать на стене"}
       </button>
     </div>
   );
@@ -459,21 +504,25 @@ function CreatePost({ onPublish }) {
 // ---------- Стена ----------
 const WALL_TABS = [
   { id: "all", label: "Все записи" },
-  { id: "mine", label: "Мои записи" },
+  { id: "own", label: "Записи владельца" },
 ];
 
-function Wall({ posts, postActions }) {
+function Wall({ owner, isMe, feed }) {
   const [tab, setTab] = useState("all");
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
 
-  // На стене — мои записи и записи друзей; закреплённая всегда первая
-  const wallPosts = posts
-    .filter((p) => p.mine || p.wall)
-    .filter((p) => tab === "all" || p.mine)
-    .filter((p) => !q || p.text?.toLowerCase().includes(q))
-    .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+  // Фильтры по вкладке и поиску — поверх загруженной стены
+  const view = useMemo(
+    () => ({
+      ...feed,
+      posts: feed.posts
+        .filter((p) => tab === "all" || p.author.id === owner.id)
+        .filter((p) => !q || p.text.toLowerCase().includes(q)),
+    }),
+    [feed, tab, q, owner.id],
+  );
 
   const closeSearch = () => {
     setSearchOpen(false);
@@ -506,48 +555,121 @@ function Wall({ posts, postActions }) {
                   className={`seg ${tab === t.id ? "active" : ""}`}
                   onClick={() => setTab(t.id)}
                 >
-                  {t.label}
+                  {t.id === "own" && isMe ? "Мои записи" : t.label}
                 </button>
               ))}
             </div>
-            <button
-              className="icon-btn"
-              title="Поиск по записям"
-              onClick={() => setSearchOpen(true)}
-            >
+            <button className="icon-btn" title="Поиск по записям" onClick={() => setSearchOpen(true)}>
               <SearchIcon size={20} />
             </button>
           </>
         )}
       </div>
 
-      {wallPosts.length > 0 ? (
-        wallPosts.map((post) => <Post key={post.id} post={post} {...postActions} />)
-      ) : (
-        <div className="card empty">
-          {q ? "По вашему запросу ничего не найдено" : "На стене пока нет ни одной записи"}
-        </div>
-      )}
+      <PostList
+        feed={view}
+        emptyText={q ? "По вашему запросу ничего не найдено" : "На стене пока нет ни одной записи"}
+      />
     </>
   );
 }
 
-// ---------- Страница ----------
+// ---------- Друзья человека (правая колонка) ----------
+function FriendsCard({ owner, isMe }) {
+  const mine = useFriends();
+  const theirs = useFriendsOf(isMe ? null : owner.id);
+  const friends = isMe ? mine.friends : theirs.data ?? [];
+  const loading = isMe ? mine.status === "loading" : theirs.loading && !theirs.data;
 
-export default function Profile({ posts, postActions, onNavigate }) {
-  const { profile, name } = useProfile();
+  return (
+    <section className="card">
+      <a className="card__header card__header--link" href={isMe ? "#friends" : undefined}>
+        Друзья <span className="muted">{loading ? "" : friends.length}</span>
+      </a>
+      {loading ? (
+        <div className="media__empty" role="status">
+          <div className="chat-status__spinner" />
+        </div>
+      ) : friends.length ? (
+        <div className="friends-mini friends-mini--wide">
+          {friends.slice(0, 8).map((p) => (
+            <a key={p.id} href={`#user/${p.id}`}>
+              <Avatar name={p.name} color={p.color} src={p.avatar} size={64} />
+              <span>{p.firstName}</span>
+            </a>
+          ))}
+        </div>
+      ) : (
+        <div className="friends-empty">
+          {isMe ? (
+            <>
+              Пока нет друзей. <a href="#friends/search">Найти знакомых</a>
+            </>
+          ) : (
+            "Пока нет друзей"
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ---------- Страница ----------
+export default function Profile({ userId, onNavigate }) {
+  const { myId, profile: myProfile } = useProfile();
+  const { relationTo } = useFriends();
+  const { openChat } = useChat();
+  const isMe = userId === myId;
+  const other = useUserProfile(isMe ? myId : userId);
+  const profile = isMe ? myProfile : other.data;
+  const feed = usePosts({ wall: userId });
   const [detailsOpen, setDetailsOpen] = useState(false);
+
+  if (!isMe && other.loading && !other.data) {
+    return (
+      <div className="card list-state" role="status">
+        <div className="chat-status__spinner" />
+        Загружаем страницу…
+      </div>
+    );
+  }
+
+  if (!isMe && other.error) {
+    return (
+      <div className="card list-state" role="alert">
+        Не удалось загрузить страницу: {other.error}
+        <button className="btn" onClick={other.reload}>
+          Повторить
+        </button>
+      </div>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <div className="card list-state">
+        Такой страницы нет — возможно, пользователь удалил аккаунт.
+        <a className="btn" href="#feed">
+          В ленту
+        </a>
+      </div>
+    );
+  }
+
+  const name = fullName(profile);
+  const person = { id: profile.id, name, firstName: profile.firstName, color: profile.color, avatar: profile.avatar };
   const education = formatEducation(profile.education);
+  const canPost = isMe || relationTo(userId) === "friend";
 
   return (
     <>
       <div className="card profile-head">
-        <Cover />
+        <Cover profile={profile} editable={isMe} />
         <div className="profile-info">
-          <ProfileAvatar />
+          <ProfileAvatar profile={profile} editable={isMe} />
           <div className="profile-info__meta">
             <h1 className="profile-info__name">{name}</h1>
-            <Status />
+            <Status profile={profile} editable={isMe} />
             <div className="profile-info__details">
               {profile.contacts.city && (
                 <span className="profile-info__chip">
@@ -571,66 +693,52 @@ export default function Profile({ posts, postActions, onNavigate }) {
             </div>
           </div>
           <div className="profile-info__actions">
-            <button className="btn btn--neutral" onClick={() => onNavigate("edit")}>
-              Редактировать профиль
-            </button>
-            <button className="btn btn--neutral">
-              Ещё
-              <ChevronDownIcon size={16} />
-            </button>
+            {isMe ? (
+              <button className="btn btn--neutral" onClick={() => onNavigate("edit")}>
+                Редактировать профиль
+              </button>
+            ) : (
+              <>
+                <FriendButton person={person} />
+                <button
+                  className="btn btn--neutral"
+                  onClick={() => {
+                    openChat(person);
+                    onNavigate("messages");
+                  }}
+                >
+                  <MessageIcon size={18} />
+                  Сообщение
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
 
       {detailsOpen && (
         <ProfileDetailsModal
+          profile={profile}
           onClose={() => setDetailsOpen(false)}
-          onEdit={() => {
-            setDetailsOpen(false);
-            onNavigate("edit");
-          }}
+          onEdit={
+            isMe &&
+            (() => {
+              setDetailsOpen(false);
+              onNavigate("edit");
+            })
+          }
         />
       )}
 
       <div className="columns columns--profile">
         <div>
-          <MediaCard />
-          <CreatePost onPublish={postActions.onPublish} />
-
-          <Wall posts={posts} postActions={postActions} />
+          <MediaCard owner={person} isMe={isMe} />
+          {canPost && <CreatePost owner={person} isMe={isMe} onPublish={feed.publish} />}
+          <Wall owner={person} isMe={isMe} feed={feed} />
         </div>
 
         <aside className="columns__side">
-          <section className="card">
-            <div className="card__header">
-              Друзья <span className="muted">{people.length}</span>
-            </div>
-            <div className="friends-mini friends-mini--wide">
-              {people.slice(0, 8).map((p) => (
-                <a key={p.id} href="#friends">
-                  <Avatar name={p.name} color={p.color} size={64} />
-                  <span>{p.name.split(" ")[0]}</span>
-                </a>
-              ))}
-            </div>
-          </section>
-
-          <section className="card">
-            <div className="card__header">
-              Подписки <span className="muted">{communities.length}</span>
-            </div>
-            <div className="subs-list">
-              {communities.map((c) => (
-                <div key={c.id} className="subs-item">
-                  <Avatar name={c.name} color={c.color} size={40} />
-                  <div>
-                    <div className="subs-item__name">{c.name}</div>
-                    <div className="subs-item__desc">{c.desc}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
+          <FriendsCard owner={person} isMe={isMe} />
         </aside>
       </div>
     </>

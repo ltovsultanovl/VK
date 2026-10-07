@@ -1017,7 +1017,25 @@ input, textarea { font: inherit; color: var(--text); }
 .friend__name { font-weight: 500; font-size: 14px; }
 .friend__name:hover { text-decoration: underline; cursor: pointer; }
 .friend__city { color: var(--text-secondary); margin-top: 2px; }
-.friend__write { display: inline-block; margin-top: 6px; color: var(--accent); cursor: pointer; }
+.friend__write {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.friend__name { display: block; color: var(--text); }
+.friend__button { flex-shrink: 0; }
+.friends-group {
+  padding: 16px 16px 8px;
+  color: var(--text-subhead);
+  font-size: 13px;
+  font-weight: 500;
+}
+.empty--compact { padding: 16px; }
 .friend__write:hover { text-decoration: underline; }
 
 /* =========================================================
@@ -1921,4 +1939,301 @@ input, textarea { font: inherit; color: var(--text); }
   .viewer__bar { flex-wrap: wrap; padding: 8px 16px; }
   .viewer__links { margin-left: 0; }
   .viewer__nav { opacity: 0.8; }
+}
+
+/* =========================================================
+   Вход, регистрация, заставка
+   ========================================================= */
+.splash {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 24px 16px;
+  background: var(--bg);
+}
+.splash__logo { display: flex; align-items: center; gap: 10px; }
+.splash__logo .logo__mark { width: 40px; height: 40px; border-radius: 12px; font-size: 17px; }
+.splash__logo .logo__text { font-size: 26px; }
+.splash__error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 420px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-align: center;
+}
+.splash__error p { margin: 0; line-height: 20px; }
+
+.auth-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 400px;
+  margin: 0;
+  padding: 28px 24px 20px;
+}
+.auth-card__title { margin: 0; font-size: 20px; font-weight: 600; text-align: center; }
+.auth-card__text { margin: 0 0 4px; color: var(--text-secondary); font-size: 14px; line-height: 20px; text-align: center; }
+.auth-card .field { height: 40px; font-size: 15px; }
+.auth-card__code { text-align: center; letter-spacing: 4px; font-size: 20px !important; }
+.auth-card__submit { height: 40px; font-size: 15px; }
+.auth-card__links { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.auth-card .form-row__error { margin-top: -6px; }
+.setup-steps { margin: 0; padding-left: 20px; line-height: 22px; font-size: 14px; }
+.setup-steps code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--field-bg);
+  font-size: 13px;
+}
+
+/* =========================================================
+   Состояния списков, друзья, посты с фото
+   ========================================================= */
+.list-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 16px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-align: center;
+}
+.friends-empty { padding: 4px 16px 16px; color: var(--text-secondary); }
+.friends-empty a { color: var(--accent); }
+.card__header--link { color: var(--text); }
+a.card__header--link[href]:hover { text-decoration: underline; }
+
+.friend-actions { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.friend-menu { position: relative; display: inline-block; }
+
+.post__arrow { color: var(--text-secondary); }
+.post__image {
+  display: block;
+  width: 100%;
+  max-height: 560px;
+  margin-top: 10px;
+  object-fit: cover;
+  background: var(--field-bg);
+}
+
+.composer__attachment {
+  position: relative;
+  flex-basis: 100%;
+  margin: 4px 0 0 40px;
+}
+.composer__attachment img {
+  display: block;
+  max-width: 100%;
+  max-height: 240px;
+  border-radius: 10px;
+}
+.composer__attachment .media__photo-delete { opacity: 1; }
+
+/* Поле пароля с кнопкой «Показать» и переключатель вход/регистрация */
+.password-field { position: relative; }
+.password-field .field { padding-right: 84px; }
+.password-field__toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.password-field__toggle:hover { background: var(--hover); }
+.auth-card__switch {
+  padding-top: 12px;
+  border-top: 1px solid var(--separator);
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-align: center;
+}
+.auth-card__switch .link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+}
+
+/* =========================================================
+   Вложения в чате: фото и видео
+   ========================================================= */
+.chat { position: relative; }
+.chat--drag .chat__body { outline: 2px dashed var(--accent); outline-offset: -8px; }
+.chat__drop {
+  position: absolute;
+  inset: 56px 0 64px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-alpha);
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 500;
+  pointer-events: none;
+}
+
+.msg--with-media { padding: 4px; max-width: min(72%, 360px); }
+.msg--with-media .msg__text { display: block; padding: 6px 8px 0; }
+.msg--with-media .msg__time { margin-right: 8px; }
+.msg__media {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.06);
+}
+.msg__media img,
+.msg__media video {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: cover;
+}
+.msg__media img { cursor: zoom-in; }
+.msg__media video { background: #000; object-fit: contain; }
+.msg__media-placeholder {
+  display: grid;
+  place-items: center;
+  width: 240px;
+  max-width: 100%;
+  height: 180px;
+}
+.msg__media-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.chat__attachment {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--separator);
+}
+.chat__attachment img,
+.chat__attachment video {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #000;
+}
+.chat__attachment-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: rgba(0, 0, 0, 0.88);
+  cursor: zoom-out;
+  animation: fade-in 0.15s ease;
+}
+.lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 8px;
+  object-fit: contain;
+}
+.msg__media-error { padding: 12px; color: var(--text-secondary); font-size: 13px; text-align: center; }
+
+/* Меню скрепки: Фото / Видео / Музыка — как в VK */
+.attach-menu { position: relative; }
+.attach-menu__trigger--open { background: var(--hover); }
+.attach-menu__list {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  min-width: 200px;
+  padding: 6px;
+  border: 1px solid var(--separator);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--shadow-popup);
+  animation: modal-in 0.15s ease;
+}
+.attach-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+.attach-menu__item svg { color: var(--icon-secondary); }
+.attach-menu__item:hover { background: var(--hover); }
+
+/* Музыка в сообщении */
+.msg__audio {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 260px;
+  padding: 6px 6px 2px;
+}
+.msg__audio-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+}
+.msg__audio-icon .chat-status__spinner { width: 18px; height: 18px; border-width: 2px; border-top-color: #fff; }
+.msg__audio-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.msg__audio-name {
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.msg__audio audio { width: 100%; height: 32px; }
+.msg__audio-error { color: var(--text-secondary); font-size: 12.5px; }
+.msg--with-media:has(.msg__audio) { max-width: min(80%, 380px); }
+.chat__attachment-audio {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
 }

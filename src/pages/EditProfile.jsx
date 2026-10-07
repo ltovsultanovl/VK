@@ -116,6 +116,7 @@ export default function EditProfile({ onNavigate }) {
   const [section, setSection] = useState("main");
   const [draft, setDraft] = useState(() => pick(profile));
   const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(pick(profile));
 
@@ -135,7 +136,7 @@ export default function EditProfile({ onNavigate }) {
       return next;
     });
 
-  const save = () => {
+  const save = async () => {
     const nextErrors = {
       firstName: validateName(draft.firstName, "имя"),
       lastName: validateName(draft.lastName, "фамилию"),
@@ -150,9 +151,13 @@ export default function EditProfile({ onNavigate }) {
       firstName: draft.firstName.trim(),
       lastName: draft.lastName.trim(),
     };
-    updateProfile(clean);
-    setDraft(clean);
-    showSnackbar("Изменения сохранены");
+    setSaving(true);
+    const ok = await updateProfile(clean);
+    setSaving(false);
+    if (ok) {
+      setDraft(clean);
+      showSnackbar("Изменения сохранены");
+    }
   };
 
   const days = range(1, daysInMonth(draft.birthMonth, draft.birthYear));
@@ -402,8 +407,8 @@ export default function EditProfile({ onNavigate }) {
           )}
 
           <div className="edit__footer">
-            <button className="btn" disabled={!dirty}>
-              Сохранить
+            <button className="btn" disabled={!dirty || saving}>
+              {saving ? "Сохраняем…" : "Сохранить"}
             </button>
             {dirty && (
               <button

@@ -6,6 +6,7 @@ import MediaEmpty from "./MediaEmpty";
 import { ArticlesIcon, TrashIcon } from "../Icons";
 import { useSnackbar } from "../Snackbar";
 import { useStoredState } from "../../hooks";
+import { useProfile } from "../../context/ProfileContext";
 import { formatDate } from "../../utils";
 
 function NewArticleModal({ onCreate, onClose }) {
@@ -57,7 +58,8 @@ function NewArticleModal({ onCreate, onClose }) {
 
 export default function ArticlesTab() {
   const showSnackbar = useSnackbar();
-  const [articles, setArticles] = useStoredState("articles", []);
+  const { myId } = useProfile();
+  const [articles, setArticles] = useStoredState(`articles:${myId}`, []);
   const [creating, setCreating] = useState(false);
   const [reading, setReading] = useState(null);
   const [toDelete, setToDelete] = useState(null);

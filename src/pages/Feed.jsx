@@ -1,40 +1,57 @@
-import { useState } from "react";
-import Stories from "../components/Stories";
+import { useMemo, useState } from "react";
 import Composer from "../components/Composer";
-import Post from "../components/Post";
+import PostList from "../components/PostList";
 import SideMenu from "../components/SideMenu";
+import { useProfile } from "../context/ProfileContext";
+import { useFriends } from "../context/FriendsContext";
+import { usePosts } from "../resources";
 
-const tabs = ["Новости", "Рекомендации", "Поиск", "Понравилось"];
-const extra = [{ label: "Обновления", counter: 4 }, { label: "Комментарии" }];
+const TABS = [
+  { id: "news", label: "Новости" },
+  { id: "all", label: "Все записи" },
+  { id: "liked", label: "Понравилось" },
+];
 
-export default function Feed({ posts, postActions }) {
-  const [tab, setTab] = useState(tabs[0]);
-  const visible = tab === "Понравилось" ? posts.filter((p) => p.liked) : posts;
+const EMPTY = {
+  news: "В ленте пока пусто. Добавьте друзей — здесь появятся их записи",
+  all: "Пока никто ничего не написал. Будьте первым!",
+  liked: "Вы ещё не отметили ни одной записи",
+};
+
+export default function Feed() {
+  const { myId } = useProfile();
+  const { friends } = useFriends();
+  const [tab, setTab] = useState("news");
+
+  // Новости — записи на стенах друзей и на моей
+  const ownerIds = useMemo(() => [myId, ...friends.map((f) => f.id)].sort(), [myId, friends]);
+  const source = tab === "news" ? { feed: ownerIds } : tab === "all" ? { feed: null } : { liked: true };
+  const feed = usePosts(source);
 
   return (
     <div className="columns">
       <div>
-        <Stories />
-        <Composer onPublish={postActions.onPublish} />
-        {visible.map((post) => (
-          <Post key={post.id} post={post} {...postActions} />
-        ))}
-        {visible.length === 0 && (
-          <div className="card empty">Здесь пока пусто</div>
-        )}
+        {tab !== "liked" && <Composer onPublish={(data) => feed.publish({ ownerId: myId, ...data })} />}
+        <PostList
+          feed={feed}
+          emptyText={EMPTY[tab]}
+          emptyAction={
+            tab === "news" && (
+              <a className="btn" href="#friends/search">
+                Найти друзей
+              </a>
+            )
+          }
+        />
       </div>
 
       <aside className="columns__side">
         <SideMenu
-          items={[
-            ...tabs.map((label) => ({
-              label,
-              active: tab === label,
-              onClick: () => setTab(label),
-            })),
-            "separator",
-            ...extra,
-          ]}
+          items={TABS.map((t) => ({
+            label: t.label,
+            active: tab === t.id,
+            onClick: () => setTab(t.id),
+          }))}
         />
       </aside>
     </div>

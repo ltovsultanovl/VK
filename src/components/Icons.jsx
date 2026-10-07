@@ -456,3 +456,11 @@ export const PauseIcon = (p) => (
     <path d="M8 5.5v13M16 5.5v13" strokeWidth="3" />
   </Svg>
 );
+
+// Видеокамера — пункт «Видео» в меню вложений
+export const CamcorderIcon = (p) => (
+  <Svg {...p}>
+    <rect x="3" y="6" width="13" height="12" rx="3" />
+    <path d="m16 10.5 4.2-2.6a.5.5 0 0 1 .8.4v7.4a.5.5 0 0 1-.8.4L16 13.5" />
+  </Svg>
+);

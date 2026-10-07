@@ -13,8 +13,6 @@ export const plural = (n, [one, few, many]) => {
   return many;
 };
 
-export const nowTime = () => new Date().toTimeString().slice(0, 5);
-
 // Читает картинку из файла и ужимает её через canvas,
 // чтобы dataURL поместился в localStorage.
 // square: true — центрированная квадратная обрезка (для аватара)

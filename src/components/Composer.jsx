@@ -1,12 +1,37 @@
 import { useRef, useState } from "react";
 import MeAvatar from "./MeAvatar";
-import { ClipsIcon, MusicIcon, PhotoIcon, VideoIcon } from "./Icons";
+import { CloseIcon, PhotoIcon } from "./Icons";
+import { useSnackbar } from "./Snackbar";
+import { useFilePicker } from "../hooks";
+import { readImage } from "../utils";
 
-export default function Composer({ onPublish, autoFocus = false, onCancel }) {
+// Новая запись: текст и, по желанию, одна фотография.
+// onPublish({ text, imageDataUrl }) → true, если опубликовано
+export default function Composer({
+  onPublish,
+  autoFocus = false,
+  onCancel,
+  placeholder = "Что у вас нового?",
+}) {
+  const showSnackbar = useSnackbar();
   const [text, setText] = useState("");
+  const [image, setImage] = useState(null);
   const [focused, setFocused] = useState(false);
+  const [sending, setSending] = useState(false);
   const ref = useRef(null);
-  const expanded = focused || text.length > 0;
+  const expanded = focused || text.length > 0 || image;
+  const canPublish = (text.trim() || image) && !sending;
+
+  const picker = useFilePicker({
+    accept: "image/*",
+    onPick: async ([file]) => {
+      try {
+        setImage(await readImage(file, { max: 1600, quality: 0.85 }));
+      } catch (e) {
+        showSnackbar(e.message, "error");
+      }
+    },
+  });
 
   const resize = () => {
     const el = ref.current;
@@ -14,11 +39,14 @@ export default function Composer({ onPublish, autoFocus = false, onCancel }) {
     el.style.height = el.scrollHeight + "px";
   };
 
-  const publish = () => {
-    const value = text.trim();
-    if (!value) return ref.current.focus();
-    onPublish(value);
+  const publish = async () => {
+    if (!canPublish) return;
+    setSending(true);
+    const ok = await onPublish({ text: text.trim(), imageDataUrl: image });
+    setSending(false);
+    if (!ok) return;
     setText("");
+    setImage(null);
     setFocused(false);
     ref.current.style.height = "auto";
   };
@@ -30,12 +58,13 @@ export default function Composer({ onPublish, autoFocus = false, onCancel }) {
         ref={ref}
         rows={1}
         autoFocus={autoFocus}
-        placeholder="Что у вас нового?"
+        placeholder={placeholder}
+        maxLength={10000}
         value={text}
         onFocus={() => setFocused(true)}
         onBlur={() => {
           setFocused(false);
-          if (!text.trim()) onCancel?.();
+          if (!text.trim() && !image) onCancel?.();
         }}
         onChange={(e) => {
           setText(e.target.value);
@@ -43,28 +72,33 @@ export default function Composer({ onPublish, autoFocus = false, onCancel }) {
         }}
       />
       <div className="composer__tools">
-        <button className="icon-btn" title="Фотография">
+        <button
+          className="icon-btn"
+          title="Прикрепить фотографию"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={picker.open}
+        >
           <PhotoIcon />
         </button>
-        <button className="icon-btn" title="Видео">
-          <VideoIcon />
-        </button>
-        <button className="icon-btn" title="Музыка">
-          <MusicIcon />
-        </button>
-        <button className="icon-btn" title="Клип">
-          <ClipsIcon />
-        </button>
+        {picker.input}
       </div>
+      {image && (
+        <div className="composer__attachment">
+          <img src={image} alt="" />
+          <button className="media__photo-delete" onClick={() => setImage(null)} title="Убрать фото">
+            <CloseIcon size={16} />
+          </button>
+        </div>
+      )}
       {expanded && (
         <div className="composer__footer">
           <button
             className="btn"
             onMouseDown={(e) => e.preventDefault()}
             onClick={publish}
-            disabled={!text.trim()}
+            disabled={!canPublish}
           >
-            Опубликовать
+            {sending ? "Публикуем…" : "Опубликовать"}
           </button>
         </div>
       )}

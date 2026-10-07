@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ConfirmModal from "./ConfirmModal";
+import Avatar from "./Avatar";
 import MeAvatar from "./MeAvatar";
 import {
   ChevronDownIcon,
@@ -30,15 +31,17 @@ function MoreMenu({ photo, onMakeAvatar }) {
       </button>
       {open && (
         <div className="dropdown viewer__dropdown">
-          <button
-            className="dropdown__item"
-            onClick={() => {
-              close();
-              onMakeAvatar();
-            }}
-          >
-            <UserIcon /> Сделать фото профиля
-          </button>
+          {onMakeAvatar && (
+            <button
+              className="dropdown__item"
+              onClick={() => {
+                close();
+                onMakeAvatar();
+              }}
+            >
+              <UserIcon /> Сделать фото профиля
+            </button>
+          )}
           <a
             className="dropdown__item"
             href={photo.src}
@@ -56,20 +59,26 @@ function MoreMenu({ photo, onMakeAvatar }) {
 }
 
 // ---------- Просмотр фото как в VK: фото слева, автор и комментарии справа ----------
+// owner — владелец фото; удалять фото и ставить на аватар может только он сам.
+// Действия — из usePhotos: onDelete, onToggleLike, onComment, onDeleteComment
 export default function PhotoViewer({
   photos,
   index,
-  album = "Фото профиля",
+  owner,
   onIndexChange,
   onClose,
   onDelete,
-  onUpdate,
+  onToggleLike,
+  onComment,
+  onDeleteComment,
 }) {
-  const { name, updateProfile } = useProfile();
+  const { myId, updateProfile } = useProfile();
   const showSnackbar = useSnackbar();
   const [confirming, setConfirming] = useState(false);
   const [failedSrc, setFailedSrc] = useState(null);
   const [comment, setComment] = useState("");
+  const [sending, setSending] = useState(false);
+  const isMine = owner.id === myId;
   const commentsRef = useRef(null);
   const count = photos.length;
   const photo = photos[index];
@@ -102,38 +111,28 @@ export default function PhotoViewer({
 
   const remove = () => {
     setConfirming(false);
-    onDelete(photo.id);
+    onDelete(photo);
     if (count === 1) onClose();
     else if (index === count - 1) onIndexChange(index - 1);
   };
 
-  const toggleLike = () =>
-    onUpdate(photo.id, (p) => ({
-      ...p,
-      liked: !p.liked,
-      likes: p.likes + (p.liked ? -1 : 1),
-    }));
-
   const share = async () => {
     try {
-      await navigator.clipboard.writeText(`${location.origin}${location.pathname}#profile`);
+      await navigator.clipboard.writeText(`${location.origin}${location.pathname}#user/${owner.id}`);
       showSnackbar("Ссылка скопирована");
     } catch {
       showSnackbar("Не удалось скопировать ссылку", "error");
     }
   };
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
     const text = comment.trim();
-    if (!text) return;
-    onUpdate(photo.id, (p) => ({
-      ...p,
-      comments: [
-        ...p.comments,
-        { id: crypto.randomUUID(), text, createdAt: new Date().toISOString() },
-      ],
-    }));
+    if (!text || sending) return;
+    setSending(true);
+    const ok = await onComment(photo, text);
+    setSending(false);
+    if (!ok) return;
     setComment("");
     // Прокручиваем к новому комментарию
     requestAnimationFrame(() => {
@@ -141,12 +140,6 @@ export default function PhotoViewer({
       if (el) el.scrollTop = el.scrollHeight;
     });
   };
-
-  const removeComment = (id) =>
-    onUpdate(photo.id, (p) => ({
-      ...p,
-      comments: p.comments.filter((c) => c.id !== id),
-    }));
 
   return createPortal(
     <div
@@ -187,7 +180,7 @@ export default function PhotoViewer({
           </div>
 
           <div className="viewer__bar">
-            <span className="viewer__album">{album}</span>
+            <span className="viewer__album">Фотографии · {owner.name}</span>
             <span className="viewer__counter">
               {index + 1} из {count}
             </span>
@@ -195,24 +188,25 @@ export default function PhotoViewer({
               <button className="viewer__link" onClick={share}>
                 Поделиться
               </button>
-              <span className="viewer__dot">·</span>
-              <button
-                className="viewer__link"
-                onClick={() => showSnackbar("Отметки людей пока недоступны", "info")}
-              >
-                Отметить человека
-              </button>
-              <span className="viewer__dot">·</span>
-              <button className="viewer__link" onClick={() => setConfirming(true)}>
-                Удалить
-              </button>
+              {isMine && (
+                <>
+                  <span className="viewer__dot">·</span>
+                  <button className="viewer__link" onClick={() => setConfirming(true)}>
+                    Удалить
+                  </button>
+                </>
+              )}
               <span className="viewer__dot">·</span>
               <MoreMenu
                 photo={photo}
-                onMakeAvatar={() => {
-                  updateProfile({ avatar: photo.src });
-                  showSnackbar("Фотография профиля обновлена");
-                }}
+                onMakeAvatar={
+                  isMine &&
+                  (async () => {
+                    if (await updateProfile({ avatar: photo.src })) {
+                      showSnackbar("Фотография профиля обновлена");
+                    }
+                  })
+                }
               />
             </div>
           </div>
@@ -221,10 +215,10 @@ export default function PhotoViewer({
         {/* ---------- Автор, лайки, комментарии ---------- */}
         <aside className="viewer__side">
           <header className="viewer__author">
-            <MeAvatar size={48} />
+            <Avatar name={owner.name} color={owner.color} src={owner.avatar} size={48} />
             <div>
-              <a href="#profile" className="viewer__name" onClick={onClose}>
-                {name}
+              <a href={`#user/${owner.id}`} className="viewer__name" onClick={onClose}>
+                {owner.name}
               </a>
               <div className="viewer__date">{formatDate(photo.createdAt)}</div>
             </div>
@@ -233,7 +227,7 @@ export default function PhotoViewer({
           <div className="viewer__actions">
             <button
               className={`viewer__action ${photo.liked ? "viewer__action--liked" : ""}`}
-              onClick={toggleLike}
+              onClick={() => onToggleLike(photo)}
               title="Нравится"
             >
               <LikeIcon size={28} filled={photo.liked} />
@@ -253,15 +247,19 @@ export default function PhotoViewer({
             ) : (
               photo.comments.map((c) => (
                 <div key={c.id} className="comment viewer__comment">
-                  <MeAvatar size={32} />
+                  <Avatar name={c.author.name} color={c.author.color} src={c.author.avatar} size={32} />
                   <div className="comment__body">
-                    <span className="comment__name">{name}</span>
+                    <a href={`#user/${c.author.id}`} className="comment__name" onClick={onClose}>
+                      {c.author.name}
+                    </a>
                     <div className="comment__text">{c.text}</div>
                     <div className="comment__meta">
                       <span>{formatDate(c.createdAt)}</span>
-                      <button className="comment__reply" onClick={() => removeComment(c.id)}>
-                        Удалить
-                      </button>
+                      {(isMine || c.author.id === myId) && (
+                        <button className="comment__reply" onClick={() => onDeleteComment(photo, c)}>
+                          Удалить
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -273,6 +271,8 @@ export default function PhotoViewer({
             <MeAvatar size={32} />
             <input
               placeholder="Написать комментарий..."
+              maxLength={2000}
+              disabled={sending}
               value={comment}
               onChange={(e) => setComment(e.target.value)}
             />

@@ -2,6 +2,9 @@ import { useEffect, useMemo } from "react";
 import Messenger from "./Messenger";
 import { messageSummary, useChat } from "../context/ChatContext";
 import { formatDay, formatDialogTime, formatTime } from "../utils";
+import { usePageVisible } from "../hooks";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const messageState = (m, out) => {
   if (m.failed) return "failed";
@@ -22,6 +25,7 @@ export default function OnlineMessenger() {
     setActivePeerId,
     sendMessage,
     retryMessage,
+    deleteMessage,
     markRead,
     sendTyping,
     retry,
@@ -46,11 +50,16 @@ export default function OnlineMessenger() {
             attachment: m.attachment_type && {
               type: m.attachment_type,
               name: m.attachment_name,
+              meta: m.attachment_meta,
               url: m.localUrl ?? fileUrls[m.attachment_path] ?? null,
             },
+            shared: m.shared_type && { type: m.shared_type, id: m.shared_id },
             time: formatTime(m.created_at),
             day: formatDay(m.created_at),
             state: messageState(m, out),
+            // «Удалить у всех» — своё, уже на сервере и не старше суток (как в VK)
+            canDeleteForAll:
+              out && !String(m.id).startsWith("tmp-") && Date.now() - new Date(m.created_at) < DAY_MS,
             raw: m,
           };
         }),
@@ -60,10 +69,18 @@ export default function OnlineMessenger() {
 
   const active = view.find((d) => d.id === activePeerId) ?? view[0] ?? null;
 
-  // Открытый чат сразу помечаем прочитанным — и при входе, и когда приходят новые сообщения
+  // Закрепляем первый чат как выбранный: иначе при подгрузке друзей список пересортируется
+  // и открытый чат сам переключится на другой — посреди набора текста или записи голосового
   useEffect(() => {
-    if (active?.unread) markRead(active.id);
-  }, [active?.id, active?.unread, markRead]);
+    if (!activePeerId && view[0]) setActivePeerId(view[0].id);
+  }, [activePeerId, view, setActivePeerId]);
+
+  // Прочитано — только когда собеседник действительно видит чат: он открыт и вкладка на экране.
+  // Свернул окно — новые сообщения ждут; вернулся — сразу отмечаем (у отправителя станет ✓✓)
+  const pageVisible = usePageVisible();
+  useEffect(() => {
+    if (pageVisible && active?.unread) markRead(active.id);
+  }, [pageVisible, active?.id, active?.unread, markRead]);
 
   if (status === "connecting") {
     return (
@@ -91,9 +108,10 @@ export default function OnlineMessenger() {
       dialogs={view}
       activeId={active?.id}
       onOpen={setActivePeerId}
-      onSend={sendMessage}
+      onSend={(id, text, file, voice) => sendMessage(id, { text, file, voice })}
       onTyping={sendTyping}
       onRetry={(m) => retryMessage(m.raw)}
+      onDelete={(m, forAll) => deleteMessage(m.raw, { forAll })}
       emptyText="Здесь появятся ваши друзья и переписки. Найдите знакомых в разделе «Друзья»"
     />
   );

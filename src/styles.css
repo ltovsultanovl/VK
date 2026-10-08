@@ -944,8 +944,19 @@ input, textarea { font: inherit; color: var(--text); }
 .chat__empty { margin: auto; color: var(--text-secondary); }
 .chat--empty { display: flex; }
 .chat__item { display: flex; flex-direction: column; gap: inherit; }
-.msg__state { margin-left: 4px; }
-.msg__state--read { color: var(--accent); }
+/* Статус своего сообщения: ✓ отправлено (серые), ✓✓ прочитано (синие), часики, ошибка */
+.msg-status {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 3px;
+  vertical-align: -2px;
+  color: var(--text-secondary);
+}
+.msg-status svg path { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.msg-status--read { color: var(--accent); }
+.msg-status--failed { color: var(--like); }
+.msg-status--failed svg path { stroke: #fff; }
+.dialog__last .msg-status { margin: 0 3px 0 0; vertical-align: -2px; }
 .msg--failed { opacity: 0.6; }
 .msg__retry {
   align-self: flex-end;
@@ -1041,7 +1052,10 @@ input, textarea { font: inherit; color: var(--text); }
 /* =========================================================
    Аватар с фото
    ========================================================= */
+/* Фото любой формы (аватар теперь — целое фото из альбома) обрезается ровным кругом */
 .avatar__img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   border-radius: 50%;
@@ -2237,3 +2251,333 @@ a.card__header--link[href]:hover { text-decoration: underline; }
   background: var(--accent);
   color: #fff;
 }
+
+/* Аватар профиля: клик открывает фото, у своего при наведении — действия внизу, как в VK */
+.avatar-frame { position: relative; border-radius: 50%; }
+/* Обрезаем по кругу только свой аватар (там полоса действий) — у чужого не спрятать точку «в сети» */
+.avatar-frame--editable { overflow: hidden; }
+.avatar-open {
+  position: relative;
+  display: grid;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: zoom-in;
+}
+.avatar-open:disabled { cursor: default; }
+.avatar-frame:not(.avatar-frame--editable) .avatar-open:not(:disabled):hover { filter: brightness(0.92); }
+.avatar-open .avatar-edit__overlay { cursor: pointer; }
+.avatar-open:hover .avatar-edit__overlay,
+.avatar-open:focus-visible .avatar-edit__overlay { opacity: 1; }
+.avatar-actions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 0 18px;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.15s, transform 0.15s;
+}
+.avatar-frame--editable:hover .avatar-actions,
+.avatar-actions:focus-within { opacity: 1; transform: none; }
+.avatar-actions button {
+  white-space: nowrap;
+  padding: 2px 6px;
+  border: 0;
+  background: none;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.avatar-actions button:hover { text-decoration: underline; }
+@media (hover: none) {
+  .avatar-actions { opacity: 1; transform: none; }
+}
+
+/* Голосовые сообщения */
+.voice { display: flex; align-items: center; gap: 10px; min-width: 240px; padding: 4px 6px 0; }
+.voice__play {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+.voice__play:disabled { opacity: 0.6; cursor: default; }
+.voice__play .chat-status__spinner { width: 18px; height: 18px; border-width: 2px; border-top-color: #fff; }
+.voice__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.voice__wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  cursor: pointer;
+}
+.voice__wave span {
+  flex: 1;
+  min-width: 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.voice__wave span.voice__bar--played { background: var(--accent); }
+.voice__time { color: var(--text-secondary); font-size: 12px; }
+.msg--with-media:has(.voice) { max-width: min(80%, 340px); }
+
+/* Запись голосового */
+.chat__composer--recording { gap: 8px; }
+.recording {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 20px;
+  background: var(--field-bg);
+}
+.recording__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--like);
+  animation: recording-blink 1s ease-in-out infinite;
+}
+@keyframes recording-blink { 50% { opacity: 0.3; } }
+.recording__time { font-variant-numeric: tabular-nums; font-size: 14px; }
+.recording__wave {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  height: 24px;
+  overflow: hidden;
+}
+.recording__wave span { width: 3px; border-radius: 2px; background: var(--accent); transition: height 0.1s; }
+/* На синем пузыре своих сообщений непрослушанная часть волны — светлее, чтобы не сливалась */
+.msg--out .voice__wave span { background: color-mix(in srgb, var(--text) 28%, transparent); }
+.msg--out .voice__wave span.voice__bar--played { background: var(--accent); }
+
+/* =========================================================
+   Смайлики: кнопка 😊 и панель с разделами
+   ========================================================= */
+.emoji { position: relative; flex-shrink: 0; }
+.emoji__trigger { color: var(--icon-secondary); }
+.emoji__trigger--open { color: var(--accent); background: var(--hover); }
+.emoji__panel {
+  position: absolute;
+  z-index: 30;
+  width: 332px;
+  max-width: calc(100vw - 24px);
+  border: 1px solid var(--separator);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--shadow-popup);
+  animation: modal-in 0.15s ease;
+}
+.emoji__panel--top { bottom: calc(100% + 8px); }
+.emoji__panel--bottom { top: calc(100% + 8px); }
+.emoji__panel--right { right: -8px; }
+.emoji__panel--left { left: -8px; }
+.emoji__title { padding: 10px 12px 4px; color: var(--text-secondary); font-size: 12.5px; font-weight: 500; }
+.emoji__grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+  height: 232px;
+  padding: 2px 8px 8px;
+  overflow-y: auto;
+  align-content: start;
+}
+.emoji__item {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.1s, background 0.1s;
+}
+.emoji__item:hover { background: var(--hover); transform: scale(1.15); }
+.emoji__tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--separator);
+}
+.emoji__tab {
+  flex: 1;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font-size: 18px;
+  cursor: pointer;
+  filter: grayscale(0.6);
+  opacity: 0.7;
+}
+.emoji__tab:hover { background: var(--hover); opacity: 1; }
+.emoji__tab--active { background: var(--active); filter: none; opacity: 1; }
+
+/* В полях комментариев кнопка смайликов поменьше */
+.comment-form__field .emoji__trigger,
+.viewer__form .emoji__trigger { width: 28px; height: 28px; border-radius: 6px; }
+
+/* =========================================================
+   «Поделиться»: окно выбора получателей и карточка в чате
+   ========================================================= */
+.share__search { width: 100%; height: 36px; margin-bottom: 8px; }
+.share__list { max-height: 320px; overflow-y: auto; margin: 0 -8px; }
+.share__person {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.share__person:hover { background: var(--hover); }
+.share__name { flex: 1; font-size: 14px; font-weight: 500; }
+.share__person input { position: absolute; opacity: 0; pointer-events: none; }
+.share__check {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--field-border);
+  border-radius: 50%;
+  transition: background 0.15s, border-color 0.15s;
+}
+.share__person--on .share__check {
+  border-color: var(--accent);
+  background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 12 4 4 8-8'/%3E%3C/svg%3E") center / 14px no-repeat;
+}
+.share__comment { margin-top: 12px; }
+.share__copy { margin-right: auto; display: inline-flex; align-items: center; gap: 6px; }
+
+.shared {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 240px;
+  margin: 2px;
+  padding: 10px;
+  border-radius: 12px;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--card) 70%, transparent);
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+}
+a.shared:hover { background: var(--card); }
+.shared__head { display: flex; align-items: center; gap: 8px; }
+.shared__name { display: block; font-size: 13.5px; font-weight: 500; }
+.shared__meta { display: block; color: var(--text-secondary); font-size: 12px; }
+.shared__text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 13.5px;
+  line-height: 18px;
+}
+.shared__image { width: 100%; max-height: 200px; border-radius: 8px; object-fit: cover; }
+.shared__image--photo { max-height: 260px; }
+.shared--profile { flex-direction: row; align-items: center; gap: 12px; }
+.shared__open { display: block; margin-top: 2px; color: var(--accent); font-size: 12.5px; }
+.shared--state {
+  align-items: center;
+  justify-content: center;
+  min-height: 60px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  border: 0;
+  cursor: default;
+}
+button.shared--state { cursor: pointer; }
+
+/* Шапка чата: аватар и имя — ссылки на страницу собеседника */
+.chat__person { display: inline-flex; border-radius: 50%; transition: filter 0.15s; }
+.chat__person:hover { filter: brightness(0.9); }
+.chat__name--link { display: inline-block; color: var(--text); }
+.chat__name--link:hover { text-decoration: underline; }
+
+/* =========================================================
+   Действия с сообщением и удаление
+   ========================================================= */
+.msg-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 78%;
+  align-self: flex-start;
+}
+/* «⋯» всегда справа от пузыря — и у своих, и у входящих сообщений */
+.msg-line--out { align-self: flex-end; }
+.msg-line > .msg { max-width: 100%; align-self: auto; min-width: 0; }
+.msg-line > .msg--with-media { max-width: 360px; }
+.chat__item > .msg--typing { align-self: flex-start; }
+
+.msg-actions { position: relative; flex-shrink: 0; opacity: 0; transition: opacity 0.12s; }
+.msg-line:hover .msg-actions,
+.msg-actions--open,
+.msg-actions:focus-within { opacity: 1; }
+@media (hover: none) {
+  .msg-actions { opacity: 1; }
+}
+.msg-actions__btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--icon-secondary);
+  cursor: pointer;
+}
+.msg-actions__btn:hover { background: var(--hover); color: var(--text-subhead); }
+.msg-actions__menu { width: 220px; top: calc(100% + 4px); right: 0; left: auto; z-index: 25; }
+.msg-actions__menu--up { top: auto; bottom: calc(100% + 4px); }
+.msg-actions__menu--left { right: auto; left: 0; }
+
+/* Галочка в окнах (например, «Удалить для всех») */
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+.checkbox input { position: absolute; opacity: 0; pointer-events: none; }
+.checkbox__box {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--field-border);
+  border-radius: 5px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.checkbox input:checked + .checkbox__box {
+  border-color: var(--accent);
+  background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 12 4 4 8-8'/%3E%3C/svg%3E") center / 14px no-repeat;
+}
+.checkbox input:focus-visible + .checkbox__box { box-shadow: 0 0 0 3px var(--accent-alpha); }

@@ -2,6 +2,8 @@ import { useRef, useState } from "react";
 import Avatar from "./Avatar";
 import MeAvatar from "./MeAvatar";
 import ConfirmModal from "./ConfirmModal";
+import EmojiPicker from "./EmojiPicker";
+import ShareModal from "./ShareModal";
 import {
   CommentIcon,
   LikeIcon,
@@ -11,7 +13,6 @@ import {
   ShareIcon,
   TrashIcon,
 } from "./Icons";
-import { useSnackbar } from "./Snackbar";
 import { useProfile } from "../context/ProfileContext";
 import { useDropdown } from "../hooks";
 import { formatCount, formatDate, plural } from "../utils";
@@ -113,13 +114,13 @@ function Comment({ comment, canDelete, onReply, onDelete }) {
 // Действия приходят из usePosts: onLike, onComment, onDeleteComment, onDelete, onTogglePin
 export default function Post({ post, onLike, onComment, onDeleteComment, onDelete, onTogglePin }) {
   const { myId } = useProfile();
-  const showSnackbar = useSnackbar();
   const [commentsOpen, setCommentsOpen] = useState(post.comments.length > 0);
   const [showAll, setShowAll] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [comment, setComment] = useState("");
   const [sending, setSending] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const inputRef = useRef(null);
 
   const { author, owner } = post;
@@ -145,14 +146,6 @@ export default function Post({ post, onLike, onComment, onDeleteComment, onDelet
     focusInput();
   };
 
-  const share = async () => {
-    try {
-      await navigator.clipboard.writeText(`${location.origin}${location.pathname}#user/${post.ownerId}`);
-      showSnackbar("Ссылка на стену скопирована");
-    } catch {
-      showSnackbar("Не удалось скопировать ссылку", "error");
-    }
-  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -237,7 +230,7 @@ export default function Post({ post, onLike, onComment, onDeleteComment, onDelet
           <CommentIcon />
           {post.comments.length > 0 && <span>{post.comments.length}</span>}
         </button>
-        <button className="pill" onClick={share} title="Поделиться">
+        <button className="pill" onClick={() => setSharing(true)} title="Поделиться">
           <ShareIcon />
         </button>
       </footer>
@@ -268,6 +261,7 @@ export default function Post({ post, onLike, onComment, onDeleteComment, onDelet
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
               />
+              <EmojiPicker inputRef={inputRef} value={comment} onChange={setComment} size={20} />
               <button
                 className="icon-btn icon-btn--sm comment-form__send"
                 disabled={!comment.trim() || sending}
@@ -278,6 +272,13 @@ export default function Post({ post, onLike, onComment, onDeleteComment, onDelet
             </div>
           </form>
         </div>
+      )}
+      {sharing && (
+        <ShareModal
+          shared={{ type: "post", id: post.id }}
+          link={`#user/${post.ownerId}`}
+          onClose={() => setSharing(false)}
+        />
       )}
     </article>
   );

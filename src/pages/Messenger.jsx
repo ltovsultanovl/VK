@@ -1,28 +1,154 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Avatar from "../components/Avatar";
+import EmojiPicker from "../components/EmojiPicker";
+import SharedCard from "../components/SharedCard";
+import Modal from "../components/Modal";
 import { useSnackbar } from "../components/Snackbar";
-import { useDropdown, useFileDrop, useFilePicker, useScrollLock } from "../hooks";
+import {
+  useDropdown,
+  useFileDrop,
+  useFilePicker,
+  useScrollLock,
+  useVoiceRecorder,
+  voiceRecordingSupported,
+} from "../hooks";
 import { MAX_FILE_MB, attachmentKind } from "../api";
 import {
   AttachIcon,
   CamcorderIcon,
   CloseIcon,
+  CopyIcon,
   MusicIcon,
+  PauseIcon,
   PhotoIcon,
+  PlayIcon,
+  TrashIcon,
   MicIcon,
   MoreIcon,
-  PhoneIcon,
   SearchIcon,
   SendIcon,
-  SmileIcon,
   WriteIcon,
 } from "../components/Icons";
 
 const folders = ["Все", "Непрочитанные", "Личные"];
 
-// Отметка у исходящего сообщения: часики → ✓ доставлено → ✓✓ прочитано
-const STATE_MARKS = { pending: "🕓", sent: "✓", read: "✓✓" };
+// Статус своего сообщения как в VK: часики → ✓ отправлено → ✓✓ прочитано (синие), ! — ошибка
+const STATUS_LABELS = { pending: "Отправляется", sent: "Отправлено", read: "Прочитано", failed: "Не отправлено" };
+
+export function MessageStatus({ state }) {
+  if (!STATUS_LABELS[state]) return null;
+  return (
+    <span className={`msg-status msg-status--${state}`} title={STATUS_LABELS[state]} aria-label={STATUS_LABELS[state]}>
+      {state === "pending" ? (
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+          <circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M8 4.8V8l2.2 1.4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      ) : state === "failed" ? (
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+          <circle cx="8" cy="8" r="7" fill="currentColor" />
+          <path d="M8 4.5v4.2M8 11.2v.3" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 20 14" width="18" height="13" aria-hidden="true">
+          {state === "read" ? (
+            <>
+              <path d="M1.5 7.5 5 11l7-7.5" />
+              <path d="M8.6 10.2 9.4 11l7-7.5" />
+            </>
+          ) : (
+            <path d="M4.5 7.5 8 11l7-7.5" />
+          )}
+        </svg>
+      )}
+    </span>
+  );
+}
+
+// ---------- Действия с сообщением: «⋯» при наведении → Копировать / Удалить ----------
+function MessageActions({ message, onDeleteClick }) {
+  const showSnackbar = useSnackbar();
+  const menu = useDropdown();
+  const [up, setUp] = useState(true);
+
+  const toggle = (e) => {
+    // У нижних сообщений меню открываем вверх, у верхних — вниз, чтобы не обрезалось
+    setUp(e.currentTarget.getBoundingClientRect().top > 220);
+    menu.toggle();
+  };
+
+  const copy = async () => {
+    menu.close();
+    try {
+      await navigator.clipboard.writeText(message.text);
+      showSnackbar("Текст скопирован");
+    } catch {
+      showSnackbar("Не удалось скопировать", "error");
+    }
+  };
+
+  return (
+    <div className={`msg-actions ${menu.open ? "msg-actions--open" : ""}`} ref={menu.ref}>
+      <button type="button" className="msg-actions__btn" title="Действия" aria-label="Действия с сообщением" onClick={toggle}>
+        <MoreIcon size={18} />
+      </button>
+      {menu.open && (
+        <div className={`dropdown msg-actions__menu ${up ? "msg-actions__menu--up" : ""} ${message.out ? "" : "msg-actions__menu--left"}`}>
+          {message.text && (
+            <button className="dropdown__item" onClick={copy}>
+              <CopyIcon /> Копировать текст
+            </button>
+          )}
+          <button
+            className="dropdown__item dropdown__item--danger"
+            onClick={() => {
+              menu.close();
+              onDeleteClick();
+            }}
+          >
+            <TrashIcon /> Удалить
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// «Удалить сообщение?» с галочкой «Удалить для всех», как в VK
+function DeleteMessageModal({ canDeleteForAll, onConfirm, onClose }) {
+  const [forAll, setForAll] = useState(false);
+  return (
+    <Modal
+      title="Удалить сообщение?"
+      onClose={onClose}
+      width={420}
+      footer={
+        <>
+          <button className="btn btn--secondary" onClick={onClose}>
+            Отмена
+          </button>
+          <button className="btn btn--danger" onClick={() => onConfirm(forAll)} autoFocus>
+            Удалить
+          </button>
+        </>
+      }
+    >
+      <p className="modal__text">
+        {forAll
+          ? "Сообщение удалится у вас и у собеседника."
+          : "Сообщение удалится только у вас — у собеседника оно останется."}
+      </p>
+      {canDeleteForAll && (
+        <label className="checkbox">
+          <input type="checkbox" checked={forAll} onChange={(e) => setForAll(e.target.checked)} />
+          <span className="checkbox__box" aria-hidden="true" />
+          Удалить для всех
+        </label>
+      )}
+    </Modal>
+  );
+}
 
 // Фото на весь экран по клику; закрывается кликом или Esc
 function Lightbox({ url, onClose }) {
@@ -41,6 +167,81 @@ function Lightbox({ url, onClose }) {
       </button>
     </div>,
     document.body,
+  );
+}
+
+const formatDuration = (sec) => {
+  const s = Math.max(0, Math.round(sec || 0));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
+// Голосовое сообщение как в VK: кнопка ▶, волна с прогрессом (клик — перемотка) и время
+function VoicePlayer({ url, meta, pending }) {
+  const audioRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [time, setTime] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const duration = meta?.duration || 0;
+  const bars = meta?.waveform?.length ? meta.waveform : Array(48).fill(20);
+  const progress = duration ? Math.min(time / duration, 1) : 0;
+
+  const toggle = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) audio.play().catch(() => setFailed(true));
+    else audio.pause();
+  };
+
+  const seek = (e) => {
+    const audio = audioRef.current;
+    if (!audio || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const next = ((e.clientX - rect.left) / rect.width) * duration;
+    audio.currentTime = next;
+    setTime(next);
+  };
+
+  return (
+    <div className="voice">
+      <button
+        type="button"
+        className="voice__play"
+        onClick={toggle}
+        disabled={!url || pending || failed}
+        aria-label={playing ? "Пауза" : "Слушать"}
+      >
+        {pending ? <div className="chat-status__spinner" /> : playing ? <PauseIcon size={16} /> : <PlayIcon size={16} />}
+      </button>
+      <div className="voice__body">
+        <div className="voice__wave" onClick={seek}>
+          {bars.map((h, i) => (
+            <span
+              key={i}
+              className={i / bars.length < progress ? "voice__bar--played" : ""}
+              style={{ height: `${Math.max(12, h)}%` }}
+            />
+          ))}
+        </div>
+        <span className="voice__time">
+          {failed ? "Не удалось загрузить" : formatDuration(playing || time ? time : duration)}
+        </span>
+      </div>
+      {url && (
+        <audio
+          ref={audioRef}
+          src={url}
+          preload="metadata"
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => {
+            setPlaying(false);
+            setTime(0);
+          }}
+          onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+          onError={() => setFailed(true)}
+        />
+      )}
+    </div>
   );
 }
 
@@ -68,6 +269,7 @@ function AudioAttachment({ attachment, pending }) {
 function Attachment({ attachment, pending, onOpen }) {
   const { type, url } = attachment;
   if (type === "audio") return <AudioAttachment attachment={attachment} pending={pending} />;
+  if (type === "voice") return <VoicePlayer url={url} meta={attachment.meta} pending={pending} />;
   // Нет сети или ссылка устарела — показываем понятную заглушку вместо пустого пузыря
   const [failedUrl, setFailedUrl] = useState(null);
   const failed = url && url === failedUrl;
@@ -102,7 +304,7 @@ function Attachment({ attachment, pending, onOpen }) {
 // dialog: { id, person: { name, color, avatar?, online }, unread, time, typing?,
 //           messages: [{ id, out, text, summary?, attachment?: { type, url, name? }, time, day?,
 //                        state?: pending|sent|read|failed }] }
-// onSend(dialogId, text, file?) — file: фото, видео или музыка
+// onSend(dialogId, text, file?, voice?) — file: фото, видео или музыка; voice: { duration, waveform }
 export default function Messenger({
   dialogs,
   activeId,
@@ -110,8 +312,10 @@ export default function Messenger({
   onSend,
   onTyping,
   onRetry,
+  onDelete,
   emptyText = "Здесь пока нет чатов",
 }) {
+  const [toDelete, setToDelete] = useState(null); // сообщение, для которого открыто «Удалить?»
   const [text, setText] = useState("");
   const [folder, setFolder] = useState(folders[0]);
   const [query, setQuery] = useState("");
@@ -169,6 +373,46 @@ export default function Messenger({
     { label: "Музыка", Icon: MusicIcon, picker: musicPicker },
   ];
   const [dragging, dropProps] = useFileDrop(([file]) => choose(file));
+
+  // ---------- Голосовое: 🎤 → запись → 🗑 или «отправить» ----------
+  const finishVoiceRef = useRef(null);
+  const recorder = useVoiceRecorder({ maxSeconds: 300, onLimit: () => finishVoiceRef.current?.() });
+
+  const startVoice = async () => {
+    if (!voiceRecordingSupported()) {
+      showSnackbar("Этот браузер не умеет записывать звук", "error");
+      return;
+    }
+    try {
+      await recorder.start();
+    } catch (e) {
+      showSnackbar(
+        e.name === "NotAllowedError"
+          ? "Нет доступа к микрофону. Разрешите его в настройках браузера (значок слева от адреса сайта)"
+          : e.name === "NotFoundError"
+            ? "Микрофон не найден — подключите его и попробуйте снова"
+            : `Не удалось включить микрофон: ${e.message}`,
+        "error",
+      );
+    }
+  };
+
+  const finishVoice = async () => {
+    const result = await recorder.stop();
+    if (!result || !active) return;
+    if (result.duration < 0.7 || !result.blob.size) {
+      showSnackbar("Слишком короткое сообщение — удерживайте запись подольше", "info");
+      return;
+    }
+    const ext = { "audio/mp4": "m4a", "audio/ogg": "ogg" }[result.blob.type] ?? "webm";
+    const file = new File([result.blob], `voice.${ext}`, { type: result.blob.type });
+    onSend(active.id, "", file, { duration: result.duration, waveform: result.waveform });
+  };
+  finishVoiceRef.current = finishVoice;
+
+  // Переключились на другой чат посреди записи — запись выбрасываем
+  const { cancel: cancelVoice } = recorder;
+  useEffect(() => cancelVoice, [active?.id, cancelVoice]);
 
   // Освобождаем превью, когда окно закрывается
   useEffect(() => () => attachment && URL.revokeObjectURL(attachment.url), [attachment]);
@@ -243,7 +487,12 @@ export default function Messenger({
                         "печатает…"
                       ) : last ? (
                         <>
-                          {last.out && <b>Вы: </b>}
+                          {last.out && (
+                            <>
+                              <MessageStatus state={last.state} />
+                              <b>Вы: </b>
+                            </>
+                          )}
                           {last.summary ?? last.text}
                         </>
                       ) : (
@@ -266,15 +515,20 @@ export default function Messenger({
       {active ? (
         <div className={`chat ${dragging ? "chat--drag" : ""}`} {...dropProps}>
           <div className="chat__head">
-            <Avatar
-              name={active.person.name}
-              color={active.person.color}
-              src={active.person.avatar}
-              size={36}
-              online={active.person.online}
-            />
+            {/* Аватар и имя ведут на страницу собеседника, как в VK */}
+            <a href={`#user/${active.person.id}`} className="chat__person" title="Открыть страницу">
+              <Avatar
+                name={active.person.name}
+                color={active.person.color}
+                src={active.person.avatar}
+                size={36}
+                online={active.person.online}
+              />
+            </a>
             <div className="chat__title">
-              <div className="chat__name">{active.person.name}</div>
+              <a href={`#user/${active.person.id}`} className="chat__name chat__name--link">
+                {active.person.name}
+              </a>
               <div
                 className={`chat__status ${active.person.online || active.typing ? "chat__status--online" : ""}`}
               >
@@ -283,9 +537,6 @@ export default function Messenger({
             </div>
             <button className="icon-btn" title="Поиск по чату">
               <SearchIcon size={22} />
-            </button>
-            <button className="icon-btn" title="Позвонить">
-              <PhoneIcon size={22} />
             </button>
             <button className="icon-btn" title="Ещё">
               <MoreIcon size={22} />
@@ -300,25 +551,27 @@ export default function Messenger({
                 return (
                   <div key={m.id} className="chat__item">
                     {showDay && <div className="chat__day">{day}</div>}
-                    <div
-                      className={`msg ${m.out ? "msg--out" : ""} ${m.state === "failed" ? "msg--failed" : ""} ${m.attachment ? "msg--with-media" : ""}`}
-                    >
-                      {m.attachment && (
-                        <Attachment
-                          attachment={m.attachment}
-                          pending={m.state === "pending"}
-                          onOpen={setZoomUrl}
-                        />
-                      )}
-                      {m.text && <span className="msg__text">{m.text}</span>}
-                      <span className="msg__time">
-                        {m.time}
-                        {m.out && STATE_MARKS[m.state] && (
-                          <span className={`msg__state msg__state--${m.state}`}>
-                            {STATE_MARKS[m.state]}
-                          </span>
+                    <div className={`msg-line ${m.out ? "msg-line--out" : ""}`}>
+                      <div
+                        className={`msg ${m.out ? "msg--out" : ""} ${m.state === "failed" ? "msg--failed" : ""} ${m.attachment || m.shared ? "msg--with-media" : ""}`}
+                      >
+                        {m.attachment && (
+                          <Attachment
+                            attachment={m.attachment}
+                            pending={m.state === "pending"}
+                            onOpen={setZoomUrl}
+                          />
                         )}
-                      </span>
+                        {m.text && <span className="msg__text">{m.text}</span>}
+                        {m.shared && <SharedCard shared={m.shared} />}
+                        <span className="msg__time">
+                          {m.time}
+                          {m.out && <MessageStatus state={m.state} />}
+                        </span>
+                      </div>
+                      {onDelete && m.state !== "pending" && (
+                        <MessageActions message={m} onDeleteClick={() => setToDelete(m)} />
+                      )}
                     </div>
                     {m.state === "failed" && (
                       <button className="msg__retry" onClick={() => onRetry?.(m)}>
@@ -354,6 +607,37 @@ export default function Messenger({
             </div>
           )}
 
+          {recorder.recording ? (
+            <form
+              className="chat__composer chat__composer--recording"
+              onSubmit={(e) => {
+                e.preventDefault();
+                finishVoice();
+              }}
+            >
+              <button
+                type="button"
+                className="icon-btn chat__send"
+                title="Отменить запись"
+                style={{ color: "var(--like)" }}
+                onClick={recorder.cancel}
+              >
+                <TrashIcon size={22} />
+              </button>
+              <div className="recording" role="status">
+                <span className="recording__dot" />
+                <span className="recording__time">{formatDuration(recorder.seconds)}</span>
+                <span className="recording__wave">
+                  {recorder.levels.map((l, i) => (
+                    <span key={i} style={{ height: `${Math.min(100, 12 + l * 400)}%` }} />
+                  ))}
+                </span>
+              </div>
+              <button className="icon-btn chat__send" title="Отправить голосовое" autoFocus>
+                <SendIcon size={26} />
+              </button>
+            </form>
+          ) : (
           <form className="chat__composer" onSubmit={submit}>
             <div className="attach-menu" ref={attachMenu.ref}>
               <button
@@ -409,9 +693,14 @@ export default function Messenger({
                   if (e.target.value) onTyping?.(active.id);
                 }}
               />
-              <button type="button" className="icon-btn" title="Эмодзи">
-                <SmileIcon size={22} />
-              </button>
+              <EmojiPicker
+                inputRef={inputRef}
+                value={text}
+                onChange={(next) => {
+                  setText(next);
+                  if (next) onTyping?.(active.id);
+                }}
+              />
             </div>
             {canSend ? (
               <button className="icon-btn chat__send" title="Отправить">
@@ -421,13 +710,15 @@ export default function Messenger({
               <button
                 type="button"
                 className="icon-btn chat__send"
-                title="Голосовое сообщение"
+                title="Записать голосовое сообщение"
                 style={{ color: "var(--icon-secondary)" }}
+                onClick={startVoice}
               >
                 <MicIcon size={24} />
               </button>
             )}
           </form>
+          )}
         </div>
       ) : (
         <div className="chat chat--empty">
@@ -436,6 +727,17 @@ export default function Messenger({
       )}
 
       {zoomUrl && <Lightbox url={zoomUrl} onClose={() => setZoomUrl(null)} />}
+
+      {toDelete && (
+        <DeleteMessageModal
+          canDeleteForAll={toDelete.canDeleteForAll}
+          onConfirm={(forAll) => {
+            onDelete(toDelete, forAll);
+            setToDelete(null);
+          }}
+          onClose={() => setToDelete(null)}
+        />
+      )}
     </div>
   );
 }

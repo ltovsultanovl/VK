@@ -464,3 +464,10 @@ export const CamcorderIcon = (p) => (
     <path d="m16 10.5 4.2-2.6a.5.5 0 0 1 .8.4v7.4a.5.5 0 0 1-.8.4L16 13.5" />
   </Svg>
 );
+
+export const CopyIcon = (p) => (
+  <Svg {...p}>
+    <rect x="8" y="8" width="12" height="12" rx="3" />
+    <path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8" />
+  </Svg>
+);

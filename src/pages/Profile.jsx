@@ -8,6 +8,7 @@ import ProfileDetailsModal from "../components/ProfileDetailsModal";
 import PhotoViewer from "../components/PhotoViewer";
 import ConfirmModal from "../components/ConfirmModal";
 import FriendButton from "../components/FriendButton";
+import ShareModal from "../components/ShareModal";
 import AlbumsTab from "../components/media/AlbumsTab";
 import MusicTab from "../components/media/MusicTab";
 import VideoTab from "../components/media/VideoTab";
@@ -23,6 +24,7 @@ import {
   MapPinIcon,
   MessageIcon,
   MusicIcon,
+  ShareIcon,
   PhotoIcon,
   PlusIcon,
   SearchIcon,
@@ -121,75 +123,96 @@ function Cover({ profile, editable }) {
   );
 }
 
-// ---------- Аватар: свой — с меню, чужой — просто фото и «в сети» ----------
-function ProfileAvatar({ profile, editable }) {
+// ---------- Аватар как в VK: клик открывает фото, у своего при наведении — «Обновить / Удалить» ----------
+function ProfileAvatar({ profile, editable, owner, album }) {
   const { updateProfile } = useProfile();
   const { onlineIds } = useChat();
   const showSnackbar = useSnackbar();
-  const menu = useDropdown();
   const [modal, setModal] = useState(null); // 'upload' | 'delete'
+  const [viewerIndex, setViewerIndex] = useState(null);
 
-  if (!editable) {
-    return (
-      <div className="profile-info__avatar">
-        <Avatar
-          name={fullName(profile)}
-          color={profile.color}
-          src={profile.avatar}
-          size={148}
-          online={onlineIds.has(profile.id)}
-        />
-      </div>
-    );
-  }
+  // Аватар — это одно из фото со страницы: открываем просмотр на нём и даём листать остальные.
+  // Старый аватар без записи в «Фото» показываем отдельно, без лайков и комментариев
+  const avatarIndex = album.photos.findIndex((p) => p.src === profile.avatar);
+  const viewerPhotos =
+    avatarIndex >= 0
+      ? album.photos
+      : [{ id: "avatar", src: profile.avatar, createdAt: null, likes: 0, liked: false, comments: [], readOnly: true }];
 
-  const open = (name) => {
-    menu.close();
-    setModal(name);
+  const open = () => {
+    if (profile.avatar) setViewerIndex(avatarIndex >= 0 ? avatarIndex : 0);
+    else if (editable) setModal("upload");
   };
 
   return (
-    <div className="profile-info__avatar" ref={menu.ref}>
-      <button className="avatar-edit" onClick={menu.toggle} title="Изменить фотографию">
-        <Avatar name={fullName(profile)} color={profile.color} src={profile.avatar} size={148} />
-        <span className="avatar-edit__overlay">
-          <CameraIcon size={28} />
-        </span>
-      </button>
-      <button
-        className="avatar-add"
-        onClick={() => open("upload")}
-        title="Обновить фотографию"
-        aria-label="Обновить фотографию"
-      >
-        <PlusIcon size={16} />
-      </button>
-
-      {menu.open && (
-        <div className="dropdown dropdown--left">
-          <button className="dropdown__item" onClick={() => open("upload")}>
-            <PhotoIcon /> Обновить фотографию
-          </button>
-          {profile.avatar && (
-            <button className="dropdown__item" onClick={() => open("delete")}>
-              <TrashIcon /> Удалить фотографию
-            </button>
+    <div className="profile-info__avatar">
+      <div className={`avatar-frame ${editable && profile.avatar ? "avatar-frame--editable" : ""}`}>
+        <button
+          className="avatar-open"
+          onClick={open}
+          disabled={!profile.avatar && !editable}
+          title={profile.avatar ? "Открыть фотографию" : editable ? "Загрузить фотографию" : undefined}
+        >
+          <Avatar
+            name={fullName(profile)}
+            color={profile.color}
+            src={profile.avatar}
+            size={148}
+            online={!editable && onlineIds.has(profile.id)}
+          />
+          {editable && !profile.avatar && (
+            <span className="avatar-edit__overlay">
+              <CameraIcon size={28} />
+            </span>
           )}
-        </div>
+        </button>
+
+        {editable && profile.avatar && (
+          <div className="avatar-actions">
+            <button onClick={() => setModal("upload")}>Обновить фотографию</button>
+            <button onClick={() => setModal("delete")}>Удалить</button>
+          </div>
+        )}
+      </div>
+
+      {editable && (
+        <button
+          className="avatar-add"
+          onClick={() => setModal("upload")}
+          title="Обновить фотографию"
+          aria-label="Обновить фотографию"
+        >
+          <PlusIcon size={16} />
+        </button>
       )}
 
-      {modal === "upload" && <AvatarUploadModal onClose={() => setModal(null)} />}
+      {viewerIndex !== null && viewerPhotos[viewerIndex] && (
+        <PhotoViewer
+          photos={viewerPhotos}
+          index={viewerIndex}
+          owner={owner}
+          album="Фотографии со страницы"
+          onIndexChange={setViewerIndex}
+          onClose={() => setViewerIndex(null)}
+          onDelete={album.remove}
+          onToggleLike={album.toggleLike}
+          onComment={album.comment}
+          onDeleteComment={album.deleteComment}
+        />
+      )}
+
+      {modal === "upload" && <AvatarUploadModal onClose={() => setModal(null)} onSaved={album.addLocal} />}
 
       {modal === "delete" && (
         <ConfirmModal
           title="Удаление фотографии"
-          text="Вы действительно хотите удалить фотографию?"
+          text="Фотография исчезнет с аватара. В разделе «Фото» она останется — удалить её совсем можно там."
           onConfirm={async () => {
             setModal(null);
             const old = profile.avatar;
             if (await updateProfile({ avatar: null })) {
-              removeOld(old, "avatars");
-              showSnackbar("Фотография удалена");
+              removeOld(old, "avatars"); // файл удаляем, только если это старый отдельный аватар
+              showSnackbar("Фотография убрана с аватара");
             }
           }}
           onClose={() => setModal(null)}
@@ -290,9 +313,8 @@ function PhotoTile({ photo, onOpen, onDelete }) {
   );
 }
 
-function MediaCard({ owner, isMe }) {
+function MediaCard({ owner, isMe, album }) {
   const showSnackbar = useSnackbar();
-  const album = usePhotos(owner.id);
   const { photos } = album;
   const [tab, setTab] = useState("photos");
   const [allOpen, setAllOpen] = useState(false);
@@ -623,7 +645,9 @@ export default function Profile({ userId, onNavigate }) {
   const other = useUserProfile(isMe ? myId : userId);
   const profile = isMe ? myProfile : other.data;
   const feed = usePosts({ wall: userId });
+  const album = usePhotos(userId); // общий для аватара и блока «Фото»
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   if (!isMe && other.loading && !other.data) {
     return (
@@ -666,7 +690,7 @@ export default function Profile({ userId, onNavigate }) {
       <div className="card profile-head">
         <Cover profile={profile} editable={isMe} />
         <div className="profile-info">
-          <ProfileAvatar profile={profile} editable={isMe} />
+          <ProfileAvatar profile={profile} editable={isMe} owner={person} album={album} />
           <div className="profile-info__meta">
             <h1 className="profile-info__name">{name}</h1>
             <Status profile={profile} editable={isMe} />
@@ -712,9 +736,20 @@ export default function Profile({ userId, onNavigate }) {
                 </button>
               </>
             )}
+            <button className="btn btn--neutral btn--icon" title="Поделиться страницей" onClick={() => setSharing(true)}>
+              <ShareIcon size={18} />
+            </button>
           </div>
         </div>
       </div>
+
+      {sharing && (
+        <ShareModal
+          shared={{ type: "profile", id: profile.id }}
+          link={`#user/${profile.id}`}
+          onClose={() => setSharing(false)}
+        />
+      )}
 
       {detailsOpen && (
         <ProfileDetailsModal
@@ -732,7 +767,7 @@ export default function Profile({ userId, onNavigate }) {
 
       <div className="columns columns--profile">
         <div>
-          <MediaCard owner={person} isMe={isMe} />
+          <MediaCard owner={person} isMe={isMe} album={album} />
           {canPost && <CreatePost owner={person} isMe={isMe} onPublish={feed.publish} />}
           <Wall owner={person} isMe={isMe} feed={feed} />
         </div>

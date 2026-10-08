@@ -363,23 +363,32 @@ revoke execute on function public.find_profile_by_email(text) from public, anon;
 grant execute on function public.find_profile_by_email(text) to authenticated;
 
 -- =====================================================================
--- Вложения в сообщениях: фото, видео и музыка.
+-- Вложения в сообщениях: фото, видео, музыка и голосовые.
 -- Файлы лежат в закрытом хранилище chat по пути <отправитель>/<получатель>/…,
 -- открыть их могут только участники переписки (по временной ссылке)
 -- =====================================================================
 alter table public.messages add column if not exists attachment_path text;
 alter table public.messages add column if not exists attachment_type text;
 alter table public.messages add column if not exists attachment_name text; -- имя файла: название трека
+-- Для голосовых: длительность в секундах и форма волны { "duration": 4.2, "waveform": [0..100, …] }
+alter table public.messages add column if not exists attachment_meta jsonb;
+-- «Поделиться»: в сообщении — ссылка на запись, фото или страницу человека
+alter table public.messages add column if not exists shared_type text;
+alter table public.messages add column if not exists shared_id text;
 alter table public.messages alter column text set default '';
 
 alter table public.messages drop constraint if exists messages_text_check;
 alter table public.messages drop constraint if exists messages_content_check;
 alter table public.messages add constraint messages_content_check check (
   char_length(text) <= 4000
-  and (char_length(text) > 0 or attachment_path is not null)
+  and (char_length(text) > 0 or attachment_path is not null or shared_id is not null)
   and (attachment_path is null) = (attachment_type is null)
-  and (attachment_type is null or attachment_type in ('image', 'video', 'audio'))
+  and (attachment_type is null or attachment_type in ('image', 'video', 'audio', 'voice'))
   and (attachment_name is null or char_length(attachment_name) <= 200)
+  and (attachment_meta is null or pg_column_size(attachment_meta) <= 4096)
+  and (shared_type is null) = (shared_id is null)
+  and (shared_type is null or shared_type in ('post', 'photo', 'profile'))
+  and (shared_id is null or char_length(shared_id) <= 64)
 );
 
 -- Вложение можно прикрепить только из своей папки для этого получателя
@@ -426,3 +435,61 @@ drop policy if exists "Вложения: удаление своих" on storage
 create policy "Вложения: удаление своих" on storage.objects
   for delete to authenticated
   using (bucket_id = 'chat' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+-- =====================================================================
+-- Удаление сообщений, как в VK:
+--   «у себя» — сообщение скрывается только у того, кто удалил;
+--   «у всех» — удаляется совсем (только своё и только в течение суток).
+-- Менять сообщения напрямую по-прежнему нельзя — только через эти функции
+-- =====================================================================
+alter table public.messages add column if not exists hidden_by_sender boolean not null default false;
+alter table public.messages add column if not exists hidden_by_recipient boolean not null default false;
+
+create or replace function public.delete_message_for_me(p_id bigint)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  m public.messages;
+begin
+  select * into m from public.messages where id = p_id;
+  if not found or auth.uid() is null or auth.uid() not in (m.sender_id, m.recipient_id) then
+    raise exception 'Сообщение не найдено';
+  end if;
+
+  if auth.uid() = m.sender_id then
+    update public.messages set hidden_by_sender = true where id = p_id;
+  else
+    update public.messages set hidden_by_recipient = true where id = p_id;
+  end if;
+
+  -- Если сообщение скрыли оба — хранить его незачем
+  delete from public.messages where id = p_id and hidden_by_sender and hidden_by_recipient;
+end;
+$$;
+
+-- Возвращает путь вложения, чтобы сайт удалил и сам файл из хранилища
+create or replace function public.delete_message_for_all(p_id bigint)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  m public.messages;
+begin
+  select * into m from public.messages where id = p_id;
+  if not found or auth.uid() is null or m.sender_id <> auth.uid() then
+    raise exception 'Удалить у всех можно только своё сообщение';
+  end if;
+  if m.created_at < now() - interval '24 hours' then
+    raise exception 'Удалить у всех можно только в течение суток после отправки';
+  end if;
+
+  delete from public.messages where id = p_id;
+  return m.attachment_path;
+end;
+$$;
+
+revoke execute on function public.delete_message_for_me(bigint) from public, anon;
+revoke execute on function public.delete_message_for_all(bigint) from public, anon;
+grant execute on function public.delete_message_for_me(bigint) to authenticated;
+grant execute on function public.delete_message_for_all(bigint) to authenticated;

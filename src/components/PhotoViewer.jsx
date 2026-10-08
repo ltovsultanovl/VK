@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ConfirmModal from "./ConfirmModal";
+import EmojiPicker from "./EmojiPicker";
+import ShareModal from "./ShareModal";
 import Avatar from "./Avatar";
 import MeAvatar from "./MeAvatar";
 import {
@@ -65,6 +67,7 @@ export default function PhotoViewer({
   photos,
   index,
   owner,
+  album,
   onIndexChange,
   onClose,
   onDelete,
@@ -75,11 +78,13 @@ export default function PhotoViewer({
   const { myId, updateProfile } = useProfile();
   const showSnackbar = useSnackbar();
   const [confirming, setConfirming] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [failedSrc, setFailedSrc] = useState(null);
   const [comment, setComment] = useState("");
   const [sending, setSending] = useState(false);
   const isMine = owner.id === myId;
   const commentsRef = useRef(null);
+  const commentInputRef = useRef(null);
   const count = photos.length;
   const photo = photos[index];
 
@@ -94,7 +99,7 @@ export default function PhotoViewer({
   // ← → листают (кроме ввода комментария), Esc закрывает.
   // Пока открыто подтверждение удаления, клавиши обрабатывает оно
   useEffect(() => {
-    if (confirming) return;
+    if (confirming || sharing) return;
     const onKey = (e) => {
       if (e.key === "Escape") return onClose();
       if (e.target.tagName === "INPUT" || count < 2) return;
@@ -103,7 +108,7 @@ export default function PhotoViewer({
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [confirming, count, go, onClose]);
+  }, [confirming, sharing, count, go, onClose]);
 
   useScrollLock();
 
@@ -116,14 +121,7 @@ export default function PhotoViewer({
     else if (index === count - 1) onIndexChange(index - 1);
   };
 
-  const share = async () => {
-    try {
-      await navigator.clipboard.writeText(`${location.origin}${location.pathname}#user/${owner.id}`);
-      showSnackbar("Ссылка скопирована");
-    } catch {
-      showSnackbar("Не удалось скопировать ссылку", "error");
-    }
-  };
+  const share = () => setSharing(true);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -180,7 +178,7 @@ export default function PhotoViewer({
           </div>
 
           <div className="viewer__bar">
-            <span className="viewer__album">Фотографии · {owner.name}</span>
+            <span className="viewer__album">{album ?? `Фотографии · ${owner.name}`}</span>
             <span className="viewer__counter">
               {index + 1} из {count}
             </span>
@@ -188,7 +186,7 @@ export default function PhotoViewer({
               <button className="viewer__link" onClick={share}>
                 Поделиться
               </button>
-              {isMine && (
+              {isMine && !photo.readOnly && (
                 <>
                   <span className="viewer__dot">·</span>
                   <button className="viewer__link" onClick={() => setConfirming(true)}>
@@ -201,6 +199,7 @@ export default function PhotoViewer({
                 photo={photo}
                 onMakeAvatar={
                   isMine &&
+                  !photo.readOnly &&
                   (async () => {
                     if (await updateProfile({ avatar: photo.src })) {
                       showSnackbar("Фотография профиля обновлена");
@@ -224,66 +223,88 @@ export default function PhotoViewer({
             </div>
           </header>
 
-          <div className="viewer__actions">
-            <button
-              className={`viewer__action ${photo.liked ? "viewer__action--liked" : ""}`}
-              onClick={() => onToggleLike(photo)}
-              title="Нравится"
-            >
-              <LikeIcon size={28} filled={photo.liked} />
-              {photo.likes > 0 && <span>{formatCount(photo.likes)}</span>}
-            </button>
-            <button className="viewer__action" onClick={share} title="Поделиться">
-              <ShareIcon size={28} />
-            </button>
-          </div>
-
-          <div className="viewer__comments" ref={commentsRef}>
-            {photo.comments.length === 0 ? (
+          {photo.readOnly ? (
+            <div className="viewer__comments">
               <div className="viewer__empty">
-                <CommentIcon size={56} />
-                Оставьте первый комментарий к этой фотографии
+                Это фото загружено на аватар раньше, чем появились лайки и комментарии. Обновите
+                фотографию профиля — и её можно будет оценить и обсудить.
               </div>
-            ) : (
-              photo.comments.map((c) => (
-                <div key={c.id} className="comment viewer__comment">
-                  <Avatar name={c.author.name} color={c.author.color} src={c.author.avatar} size={32} />
-                  <div className="comment__body">
-                    <a href={`#user/${c.author.id}`} className="comment__name" onClick={onClose}>
-                      {c.author.name}
-                    </a>
-                    <div className="comment__text">{c.text}</div>
-                    <div className="comment__meta">
-                      <span>{formatDate(c.createdAt)}</span>
-                      {(isMine || c.author.id === myId) && (
-                        <button className="comment__reply" onClick={() => onDeleteComment(photo, c)}>
-                          Удалить
-                        </button>
-                      )}
+            </div>
+          ) : (
+            <>
+            <div className="viewer__actions">
+              <button
+                className={`viewer__action ${photo.liked ? "viewer__action--liked" : ""}`}
+                onClick={() => onToggleLike(photo)}
+                title="Нравится"
+              >
+                <LikeIcon size={28} filled={photo.liked} />
+                {photo.likes > 0 && <span>{formatCount(photo.likes)}</span>}
+              </button>
+              <button className="viewer__action" onClick={share} title="Поделиться">
+                <ShareIcon size={28} />
+              </button>
+            </div>
+
+            <div className="viewer__comments" ref={commentsRef}>
+              {photo.comments.length === 0 ? (
+                <div className="viewer__empty">
+                  <CommentIcon size={56} />
+                  Оставьте первый комментарий к этой фотографии
+                </div>
+              ) : (
+                photo.comments.map((c) => (
+                  <div key={c.id} className="comment viewer__comment">
+                    <Avatar name={c.author.name} color={c.author.color} src={c.author.avatar} size={32} />
+                    <div className="comment__body">
+                      <a href={`#user/${c.author.id}`} className="comment__name" onClick={onClose}>
+                        {c.author.name}
+                      </a>
+                      <div className="comment__text">{c.text}</div>
+                      <div className="comment__meta">
+                        <span>{formatDate(c.createdAt)}</span>
+                        {(isMine || c.author.id === myId) && (
+                          <button className="comment__reply" onClick={() => onDeleteComment(photo, c)}>
+                            Удалить
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))
-            )}
-          </div>
+                ))
+              )}
+            </div>
 
-          <form className="viewer__form" onSubmit={submit}>
-            <MeAvatar size={32} />
-            <input
-              placeholder="Написать комментарий..."
-              maxLength={2000}
-              disabled={sending}
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-            />
-            {comment.trim() && (
-              <button className="icon-btn icon-btn--sm comment-form__send" title="Отправить">
-                <SendIcon size={20} />
-              </button>
-            )}
-          </form>
+            <form className="viewer__form" onSubmit={submit}>
+              <MeAvatar size={32} />
+              <input
+                ref={commentInputRef}
+                placeholder="Написать комментарий..."
+                maxLength={2000}
+                disabled={sending}
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+              />
+              <EmojiPicker inputRef={commentInputRef} value={comment} onChange={setComment} size={20} />
+              {comment.trim() && (
+                <button className="icon-btn icon-btn--sm comment-form__send" title="Отправить">
+                  <SendIcon size={20} />
+                </button>
+              )}
+            </form>
+            </>
+          )}
         </aside>
       </div>
+
+      {sharing && (
+        <ShareModal
+          // Старый аватар без записи в «Фото» — делимся страницей владельца
+          shared={photo.readOnly ? { type: "profile", id: owner.id } : { type: "photo", id: photo.id }}
+          link={`#user/${owner.id}`}
+          onClose={() => setSharing(false)}
+        />
+      )}
 
       {confirming && (
         <ConfirmModal

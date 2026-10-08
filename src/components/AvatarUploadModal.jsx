@@ -3,13 +3,15 @@ import Modal from "./Modal";
 import { useProfile } from "../context/ProfileContext";
 import { useSnackbar } from "./Snackbar";
 import { readImage } from "../utils";
-import { explainError, removeImage, uploadImage } from "../api";
+import { addPhoto, explainError, removeImage } from "../api";
 import { useFileDrop, useFilePicker } from "../hooks";
 
 // Двухшаговая загрузка, как в VK:
 // 1) «Загрузка новой фотографии» — выбор файла / drag&drop
-// 2) «Фотография на вашей странице» — предпросмотр миниатюр
-export default function AvatarUploadModal({ onClose }) {
+// 2) «Фотография на вашей странице» — предпросмотр миниатюр.
+// Фото сохраняется целиком в «Фото» пользователя (с лайками и комментариями), а на аватаре
+// показывается кругом. onSaved(photo) — чтобы альбом на странице сразу его показал
+export default function AvatarUploadModal({ onClose, onSaved }) {
   const { myId, profile, updateProfile } = useProfile();
   const [saving, setSaving] = useState(false);
   const showSnackbar = useSnackbar();
@@ -21,7 +23,7 @@ export default function AvatarUploadModal({ onClose }) {
     setError("");
     setLoading(true);
     try {
-      setImage(await readImage(file, { max: 400, square: true }));
+      setImage(await readImage(file, { max: 1600, quality: 0.85 }));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -38,9 +40,10 @@ export default function AvatarUploadModal({ onClose }) {
   const save = async () => {
     setSaving(true);
     try {
-      const { url } = await uploadImage(myId, image, "avatars");
+      const photo = await addPhoto(myId, image);
+      onSaved?.(photo);
       const old = profile.avatar;
-      if (await updateProfile({ avatar: url })) {
+      if (await updateProfile({ avatar: photo.src })) {
         // Старый аватар удаляем, только если это был отдельный файл, а не фото из альбома
         if (old?.includes("/avatars/")) removeImage(old).catch(() => {});
         showSnackbar("Фотография обновлена");

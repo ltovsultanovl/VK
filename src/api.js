@@ -21,9 +21,13 @@ export const explainError = (error) => {
   if (/same.*password|different from the old/i.test(text)) return "Новый пароль должен отличаться от старого";
   if (/expired|invalid.*(token|otp)|token.*invalid/i.test(text)) return "Код неверный или устарел. Запросите новый";
   if (/find_profile_by_email/i.test(text)) return "Поиск по почте ещё не включён: выполните обновлённый supabase/schema.sql в SQL Editor";
-  if (/relation .* does not exist|schema cache/i.test(text)) return "В базе нет нужных таблиц. Выполните supabase/schema.sql в SQL Editor";
   if (/row-level security|permission denied/i.test(text)) return "Нет прав на это действие";
-  if (/Bucket not found/i.test(text)) return "Нет хранилища картинок. Выполните supabase/schema.sql в SQL Editor";
+  if (
+    /Bucket not found|Could not find the function|column .* does not exist|in the schema cache/i.test(text) ||
+    ["42703", "PGRST202", "PGRST204"].includes(error?.code)
+  ) {
+    return "База Supabase не обновлена: откройте SQL Editor, вставьте supabase/schema.sql целиком и нажмите Run";
+  }
   if (/exceeded the maximum allowed size|too large/i.test(text)) return "Файл слишком большой";
   if (/mime type/i.test(text)) return "Такой формат не поддерживается. Можно: фото JPG, PNG, GIF, WEBP, видео MP4, MOV, WEBM и музыку MP3, M4A, OGG, WAV, FLAC";
   return text;
@@ -410,13 +414,17 @@ const LINK_TTL = 60 * 60 * 24; // временная ссылка на файл 
 
 // Фото сжимаем (кроме GIF — иначе пропадёт анимация), видео и музыку загружаем как есть.
 // Путь <я>/<собеседник>/… — по нему правила хранилища пускают только нас двоих
-export const uploadChatFile = async (myId, peerId, file) => {
+// kind: "voice" — голосовое с микрофона (тип у файла audio/*, но показываем иначе, чем музыку)
+export const uploadChatFile = async (myId, peerId, file, { kind: forcedKind } = {}) => {
   let blob = file;
   let ext;
   let type;
   let name = null;
-  const kind = attachmentKind(file);
-  if (kind === "audio") {
+  const kind = forcedKind ?? attachmentKind(file);
+  if (kind === "voice") {
+    ext = { "audio/mp4": "m4a", "audio/ogg": "ogg" }[file.type] ?? "webm";
+    type = "voice";
+  } else if (kind === "audio") {
     if (file.size > MAX_FILE_MB * 1024 * 1024) throw new Error(`Файл больше ${MAX_FILE_MB} МБ`);
     ext = (file.name.split(".").pop() || "mp3").toLowerCase();
     type = "audio";
@@ -439,7 +447,8 @@ export const uploadChatFile = async (myId, peerId, file) => {
   const path = `${myId}/${peerId}/${crypto.randomUUID()}.${ext}`;
   unwrap(
     await supabase.storage.from(CHAT_BUCKET).upload(path, blob, {
-      contentType: blob.type || file.type || (type === "audio" ? "audio/mpeg" : undefined),
+      // без параметров вроде ";codecs=opus" — хранилище сверяет только сам тип
+      contentType: (blob.type || file.type || (type === "audio" ? "audio/mpeg" : "")).split(";")[0] || undefined,
       cacheControl: "31536000",
     }),
   );
@@ -454,3 +463,33 @@ export const getChatFileUrls = async (paths) => {
 };
 
 export const removeChatFile = (path) => supabase.storage.from(CHAT_BUCKET).remove([path]);
+
+// ---------- «Поделиться»: одна запись, одно фото — для карточки в чате ----------
+
+export const fetchPost = async (id, myId) => {
+  // id приходит из сообщения строкой — у записей и фото он числовой
+  const row = unwrap(await supabase.from("posts").select(POST_FIELDS).eq("id", Number(id)).maybeSingle());
+  return row && toPost(row, myId);
+};
+
+export const fetchPhoto = async (id) => {
+  const row = unwrap(
+    await supabase
+      .from("photos")
+      .select(`id, url, created_at, owner:profiles!photos_owner_id_fkey(${PERSON_FIELDS})`)
+      .eq("id", Number(id))
+      .maybeSingle(),
+  );
+  return row && { id: row.id, src: row.url, createdAt: row.created_at, owner: toPerson(row.owner) };
+};
+
+// ---------- Удаление сообщений ----------
+
+// «У себя» — скрыть только для меня (у собеседника сообщение останется)
+export const deleteMessageForMe = async (id) => unwrap(await supabase.rpc("delete_message_for_me", { p_id: id }));
+
+// «У всех» — удалить совсем; файл вложения тоже удаляем
+export const deleteMessageForAll = async (id) => {
+  const path = unwrap(await supabase.rpc("delete_message_for_all", { p_id: id }));
+  if (path) await removeChatFile(path).catch(() => {});
+};

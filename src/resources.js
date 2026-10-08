@@ -140,7 +140,7 @@ export function usePosts(source) {
 // ---------- Фото пользователя ----------
 
 export function usePhotos(ownerId) {
-  const { myId } = useProfile();
+  const { myId, profile, updateProfile } = useProfile();
   const showSnackbar = useSnackbar();
   const resource = useResource(() => api.fetchPhotos(ownerId, myId), [ownerId, myId]);
   const { setData, reload } = resource;
@@ -167,10 +167,15 @@ export function usePhotos(ownerId) {
     return { added, failed: files.length - added, error: lastError && api.explainError(lastError) };
   };
 
+  // Только что загруженное фото (например, новый аватар) — сразу в начало альбома
+  const addLocal = (photo) => setData((list) => [photo, ...(list ?? []).filter((p) => p.id !== photo.id)]);
+
   const remove = async (photo) => {
     setData((list) => list.filter((p) => p.id !== photo.id));
     try {
       await api.deletePhoto(photo);
+      // Удалили фото, которое стоит на аватаре, — файла больше нет, убираем и аватар
+      if (photo.ownerId === myId && profile.avatar === photo.src) await updateProfile({ avatar: null });
       showSnackbar("Фотография удалена");
     } catch (e) {
       showSnackbar(`Не удалось удалить: ${api.explainError(e)}`, "error");
@@ -210,5 +215,5 @@ export function usePhotos(ownerId) {
     }
   };
 
-  return { ...resource, photos: resource.data ?? [], upload, remove, toggleLike, comment, deleteComment };
+  return { ...resource, photos: resource.data ?? [], upload, addLocal, remove, toggleLike, comment, deleteComment };
 }

@@ -10,6 +10,8 @@ import {
 import { supabase } from "../lib/supabase";
 import {
   attachmentKind,
+  deleteMessageForAll,
+  deleteMessageForMe,
   explainError,
   fetchPeople,
   getChatFileUrls,
@@ -38,9 +40,16 @@ const upsertById = (list, row) => {
 const byTime = (a, b) => new Date(a.created_at) - new Date(b.created_at);
 
 // Короткое описание сообщения — для уведомлений и списка чатов
-const ATTACHMENT_SUMMARY = { image: "📷 Фотография", video: "🎬 Видео", audio: "🎵 Аудиозапись" };
+const SHARED_SUMMARY = { post: "📝 Запись", photo: "🖼 Фотография", profile: "👤 Страница пользователя" };
+const ATTACHMENT_SUMMARY = {
+  image: "📷 Фотография",
+  video: "🎬 Видео",
+  audio: "🎵 Аудиозапись",
+  voice: "🎤 Голосовое сообщение",
+};
 export const messageSummary = (m) =>
   m.text ||
+  SHARED_SUMMARY[m.shared_type] ||
   (m.attachment_type === "audio" && m.attachment_name ? `🎵 ${m.attachment_name}` : ATTACHMENT_SUMMARY[m.attachment_type] ?? "");
 
 // Личные сообщения в реальном времени: переписки, «в сети» (presence),
@@ -105,7 +114,12 @@ export function ChatProvider({ children }) {
         channels.push(
           supabase
             .channel("messages")
-            .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, ({ new: row }) => {
+            .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, ({ eventType, new: row, old }) => {
+              // Удалили «у всех» — убираем и у нас (в событии удаления приходит только id)
+              if (eventType === "DELETE") {
+                if (old?.id) setMessages((list) => list.filter((m) => m.id !== old.id));
+                return;
+              }
               if (!row?.id) return;
               setMessages((list) => upsertById(list, row).sort(byTime));
               const peer = row.sender_id === myId ? row.recipient_id : row.sender_id;
@@ -163,13 +177,16 @@ export function ChatProvider({ children }) {
   }, [myId, attempt, loadPeople, showSnackbar]);
 
   // ---------- Действия ----------
-  // file — фото, видео или музыка (необязательно). Сначала грузим файл, потом создаём сообщение
+  // sendMessage(to, { text, file, voice, shared }):
+  //   file — фото, видео или музыка; voice — { duration, waveform } для голосового;
+  //   shared — { type: post | photo | profile, id } — то, чем поделились.
+  // Сначала грузим файл, потом создаём сообщение
   const sendMessage = useCallback(
-    async (to, text, file = null) => {
+    async (to, { text = "", file = null, voice = null, shared = null } = {}) => {
       // Сразу показываем сообщение с часиками (и превью файла), после ответа сервера — настоящее
       const tempId = `tmp-${crypto.randomUUID()}`;
       const localUrl = file ? URL.createObjectURL(file) : null;
-      const attachmentType = file ? attachmentKind(file) : null;
+      const attachmentType = voice ? "voice" : file ? attachmentKind(file) : null;
       setMessages((list) => [
         ...list,
         {
@@ -179,6 +196,9 @@ export function ChatProvider({ children }) {
           text,
           attachment_type: attachmentType,
           attachment_name: attachmentType === "audio" ? trackTitle(file.name) : null,
+          attachment_meta: voice,
+          shared_type: shared?.type ?? null,
+          shared_id: shared ? String(shared.id) : null,
           localUrl,
           file,
           created_at: new Date().toISOString(),
@@ -189,15 +209,21 @@ export function ChatProvider({ children }) {
 
       let uploaded = null;
       try {
-        if (file) uploaded = await uploadChatFile(myId, to, file);
+        if (file) uploaded = await uploadChatFile(myId, to, file, { kind: voice ? "voice" : undefined });
         const { data, error } = await supabase
           .from("messages")
+          // Поля вложения передаём, только если оно есть: так обычный текст уходит,
+          // даже если в базе ещё нет колонок для вложений (schema.sql не обновлён)
           .insert({
             recipient_id: to,
             text,
-            attachment_path: uploaded?.path ?? null,
-            attachment_type: uploaded?.type ?? null,
-            attachment_name: uploaded?.name ?? null,
+            ...(uploaded && {
+              attachment_path: uploaded.path,
+              attachment_type: uploaded.type,
+              ...(uploaded.name && { attachment_name: uploaded.name }),
+              ...(voice && { attachment_meta: voice }),
+            }),
+            ...(shared && { shared_type: shared.type, shared_id: String(shared.id) }),
           })
           .select()
           .single();
@@ -219,7 +245,12 @@ export function ChatProvider({ children }) {
     (message) => {
       setMessages((list) => list.filter((m) => m.id !== message.id));
       if (message.localUrl) URL.revokeObjectURL(message.localUrl);
-      sendMessage(message.recipient_id, message.text, message.file);
+      sendMessage(message.recipient_id, {
+        text: message.text,
+        file: message.file,
+        voice: message.attachment_type === "voice" ? message.attachment_meta : null,
+        shared: message.shared_type && { type: message.shared_type, id: message.shared_id },
+      });
     },
     [sendMessage],
   );
@@ -273,6 +304,27 @@ export function ChatProvider({ children }) {
     [],
   );
 
+  // Удаление: forAll — у всех (своё и не старше суток), иначе только у себя.
+  // Сразу убираем с экрана; если сервер отказал — возвращаем сообщение на место
+  const deleteMessage = useCallback(
+    async (message, { forAll = false } = {}) => {
+      const isTemp = String(message.id).startsWith("tmp-");
+      setMessages((list) => list.filter((m) => m.id !== message.id));
+      if (isTemp) return true; // не ушедшее на сервер сообщение удаляем только у себя
+
+      try {
+        if (forAll) await deleteMessageForAll(message.id);
+        else await deleteMessageForMe(message.id);
+        return true;
+      } catch (e) {
+        setMessages((list) => upsertById(list, message).sort(byTime));
+        showSnackbar(`Не удалось удалить: ${explainError(e)}`, "error");
+        return false;
+      }
+    },
+    [showSnackbar],
+  );
+
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   // ---------- Диалоги: друзья + все, с кем есть переписка ----------
@@ -283,10 +335,11 @@ export function ChatProvider({ children }) {
     return [...contacts.values()]
       .filter((p) => p.id !== myId)
       .map((person) => {
+        // Скрытые «у себя» не показываем
         const thread = messages.filter(
           (m) =>
-            (m.sender_id === person.id && m.recipient_id === myId) ||
-            (m.sender_id === myId && m.recipient_id === person.id),
+            (m.sender_id === person.id && m.recipient_id === myId && !m.hidden_by_recipient) ||
+            (m.sender_id === myId && m.recipient_id === person.id && !m.hidden_by_sender),
         );
         return {
           person: { ...person, online: onlineIds.has(person.id) },
@@ -319,11 +372,12 @@ export function ChatProvider({ children }) {
       openChat,
       sendMessage,
       retryMessage,
+      deleteMessage,
       markRead,
       sendTyping,
       retry,
     }),
-    [status, error, myId, dialogs, fileUrls, unreadTotal, onlineIds, activePeerId, openChat, sendMessage, retryMessage, markRead, sendTyping, retry],
+    [status, error, myId, dialogs, fileUrls, unreadTotal, onlineIds, activePeerId, openChat, sendMessage, retryMessage, deleteMessage, markRead, sendTyping, retry],
   );
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

@@ -1632,3 +1632,147 @@ begin
   alter publication supabase_realtime add table public.notifications;
 exception when duplicate_object then null;
 end $$;
+
+-- =========================================================
+-- Защита: закрытые служебные функции, проверка адресов и цветов,
+-- ограничения размеров и защита от спама (лимиты частоты)
+-- =========================================================
+
+-- ---------- Служебные функции — только вошедшим, триггерные — никому ----------
+-- Без этого через API без входа можно было узнать, кто с кем дружит и какие роли в сообществах
+do $$
+declare
+  f text;
+begin
+  foreach f in array array[
+    'are_friends(uuid, uuid)', 'community_role(bigint, uuid)', 'can_view_community(bigint, uuid)',
+    'can_publish_in_community(bigint, uuid)', 'can_manage_community(bigint, uuid)'
+  ] loop
+    execute format('revoke execute on function public.%s from public, anon', f);
+    execute format('grant execute on function public.%s to authenticated', f);
+  end loop;
+  -- Триггерные функции вызывает сама база; права на вызов при срабатывании триггера не нужны
+  foreach f in array array[
+    'community_add_owner()', 'notify_post_like()', 'notify_post_comment()', 'notify_post()',
+    'notify_photo_like()', 'notify_photo_comment()', 'notify_video_like()', 'notify_video_comment()',
+    'notify_friendship()', 'notify_membership()'
+  ] loop
+    execute format('revoke execute on function public.%s from public, anon, authenticated', f);
+  end loop;
+end $$;
+
+-- ---------- Адреса картинок и файлов: только http(s), без кавычек, скобок и пробелов ----------
+-- Иначе можно подставить в аватар чужой адрес или строку, ломающую стили у всех, кто его видит
+create or replace function public.is_safe_url(u text)
+returns boolean
+language sql immutable
+as $$
+  select char_length(u) <= 1000 and u ~ '^https?://[^\s"''<>()\\]+$';
+$$;
+
+-- Цвет аватара — только #rrggbb (попадает в стиль страницы)
+create or replace function public.is_hex_color(c text)
+returns boolean
+language sql immutable
+as $$
+  select c ~ '^#[0-9a-fA-F]{6}$';
+$$;
+
+-- Старые данные приводим в порядок, чтобы новые проверки не мешали людям сохранять профиль
+update public.profiles set color = '#5181b8' where not public.is_hex_color(color);
+update public.profiles set avatar_url = null where avatar_url is not null and not public.is_safe_url(avatar_url);
+update public.profiles set cover_url = null where cover_url is not null and not public.is_safe_url(cover_url);
+update public.communities set color = '#5181b8' where not public.is_hex_color(color);
+update public.communities set avatar_url = null where avatar_url is not null and not public.is_safe_url(avatar_url);
+update public.communities set cover_url = null where cover_url is not null and not public.is_safe_url(cover_url);
+update public.posts set image_url = null where image_url is not null and not public.is_safe_url(image_url);
+
+-- Ограничения добавляем NOT VALID: новые и изменённые строки проверяются, старые не мешают запуску
+do $$
+declare
+  r record;
+begin
+  for r in
+    select * from (values
+      ('profiles', 'profiles_avatar_url_safe', 'avatar_url is null or public.is_safe_url(avatar_url)'),
+      ('profiles', 'profiles_cover_url_safe', 'cover_url is null or public.is_safe_url(cover_url)'),
+      ('profiles', 'profiles_color_hex', 'public.is_hex_color(color)'),
+      ('profiles', 'profiles_info_size', 'pg_column_size(info) <= 16384'),
+      ('communities', 'communities_avatar_url_safe', 'avatar_url is null or public.is_safe_url(avatar_url)'),
+      ('communities', 'communities_cover_url_safe', 'cover_url is null or public.is_safe_url(cover_url)'),
+      ('communities', 'communities_color_hex', 'public.is_hex_color(color)'),
+      ('communities', 'communities_website_plain', $c$website !~ '[\s"''<>]'$c$),
+      ('posts', 'posts_image_url_safe', 'image_url is null or public.is_safe_url(image_url)'),
+      ('photos', 'photos_url_safe', 'public.is_safe_url(url)'),
+      ('audios', 'audios_url_safe', 'public.is_safe_url(url)'),
+      ('videos', 'videos_url_safe', 'public.is_safe_url(url)'),
+      ('videos', 'videos_poster_url_safe', 'poster_url is null or public.is_safe_url(poster_url)')
+    ) as t(tbl, name, expr)
+  loop
+    execute format('alter table public.%I drop constraint if exists %I', r.tbl, r.name);
+    execute format('alter table public.%I add constraint %I check (%s) not valid', r.tbl, r.name, r.expr);
+  end loop;
+end $$;
+
+-- ---------- Защита от спама: не больше N действий за отрезок времени ----------
+-- Аргументы триггера: колонка автора, предел, окно ('1 minute', '1 hour', …)
+create or replace function public.rate_limit()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  author_col text := tg_argv[0];
+  max_count int := tg_argv[1]::int;
+  win interval := tg_argv[2]::interval;
+  uid uuid := auth.uid();
+  recent int;
+begin
+  if uid is null then return new; end if; -- служебные запросы (без пользователя) не ограничиваем
+  execute format('select count(*) from %I.%I where %I = $1 and created_at > now() - $2', tg_table_schema, tg_table_name, author_col)
+    into recent using uid, win;
+  if recent >= max_count then
+    raise exception 'Слишком часто. Подождите немного и попробуйте снова' using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
+revoke execute on function public.rate_limit() from public, anon, authenticated;
+
+-- Индексы для быстрого подсчёта «моих действий за последнее время»
+create index if not exists posts_author_idx on public.posts (author_id, created_at desc);
+create index if not exists post_comments_author_idx on public.post_comments (author_id, created_at desc);
+create index if not exists photo_comments_author_idx on public.photo_comments (author_id, created_at desc);
+create index if not exists video_comments_author_idx on public.video_comments (author_id, created_at desc);
+create index if not exists friendships_requester_idx on public.friendships (requester_id, created_at desc);
+create index if not exists community_messages_author_idx on public.community_messages (author_id, created_at desc);
+create index if not exists communities_creator_idx on public.communities (created_by, created_at desc);
+create index if not exists messages_sender_time_idx on public.messages (sender_id, created_at desc);
+create index if not exists audios_uploader_time_idx on public.audios (uploader_id, created_at desc);
+
+do $$
+declare
+  r record;
+begin
+  for r in
+    select * from (values
+      ('messages', 'sender_id', 40, '1 minute'),
+      ('community_messages', 'author_id', 20, '1 minute'),
+      ('posts', 'author_id', 15, '1 minute'),
+      ('post_comments', 'author_id', 30, '1 minute'),
+      ('photo_comments', 'author_id', 30, '1 minute'),
+      ('video_comments', 'author_id', 30, '1 minute'),
+      ('friendships', 'requester_id', 50, '1 hour'),
+      ('communities', 'created_by', 10, '1 day'),
+      ('photos', 'owner_id', 100, '1 hour'),
+      ('audios', 'uploader_id', 60, '1 hour'),
+      ('videos', 'owner_id', 30, '1 hour')
+    ) as t(tbl, col, lim, win)
+  loop
+    execute format('drop trigger if exists %I on public.%I', r.tbl || '_rate_limit', r.tbl);
+    execute format(
+      'create trigger %I before insert on public.%I for each row execute function public.rate_limit(%L, %L, %L)',
+      r.tbl || '_rate_limit', r.tbl, r.col, r.lim::text, r.win
+    );
+  end loop;
+end $$;

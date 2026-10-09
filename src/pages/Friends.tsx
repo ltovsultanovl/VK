@@ -5,7 +5,7 @@ import SideMenu from "../components/SideMenu";
 import { SearchIcon } from "../components/Icons";
 import { useProfile } from "../context/ProfileContext";
 import { useFriends } from "../context/FriendsContext";
-import { useChat } from "../context/ChatContext";
+import { useChatActions } from "../context/ChatContext";
 import { useResource } from "../resources";
 import { searchPeople } from "../api";
 import { useDebounced } from "../hooks";
@@ -17,7 +17,7 @@ const SEARCH_DELAY = 300;
 // Строка человека в списке: аватар, имя, город, действия
 function PersonRow({ person, onNavigate }: { person: Person; onNavigate: Navigate }) {
   const { myId } = useProfile();
-  const { openChat } = useChat();
+  const { openChat } = useChatActions();
 
   return (
     <div className="friend">

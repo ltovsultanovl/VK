@@ -1,7 +1,10 @@
 import type { ProfileInfo } from "./types";
 
 // Фон-картинка с запасным цветом/градиентом на время загрузки или при ошибке
-export const bg = (src: string, fallback: string) => `url("${src}") center / cover no-repeat, ${fallback}`;
+// Адрес экранируем: кавычка или скобка в нём не должны «выйти» из url(...) и сломать стили
+const CSS_URL_ESCAPES: Record<string, string> = { "(": "%28", ")": "%29", "'": "%27" };
+const cssUrl = (src: string) => src.replace(/["'()\\\s]/g, (ch) => CSS_URL_ESCAPES[ch] ?? encodeURIComponent(ch));
+export const bg = (src: string, fallback: string) => `url("${cssUrl(src)}") center / cover no-repeat, ${fallback}`;
 
 // Поля профиля из «Редактировать профиль» (хранятся в profiles.info на сервере)
 export const emptyProfileInfo: ProfileInfo = {

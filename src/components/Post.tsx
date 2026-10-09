@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { memo, useRef, useState, type FormEvent } from "react";
 import type { Comment as CommentType, Person, Post as PostType } from "../types";
 import Avatar from "./Avatar";
 import MeAvatar from "./MeAvatar";
@@ -137,7 +137,7 @@ function Comment({
 // ---------- Пост ----------
 // Действия приходят из usePosts: onLike, onComment, onDeleteComment, onDelete, onTogglePin
 // onApprove — опубликовать предложенную новость (есть только в списке «Предложенные»)
-export default function Post({
+export default memo(function Post({
   post,
   onLike,
   onComment,
@@ -353,4 +353,4 @@ export default function Post({
       )}
     </article>
   );
-}
+});

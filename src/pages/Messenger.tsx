@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
 import type { AttachmentType, ChatPeer, Shared, VoiceMeta } from "../types";
 import { createPortal } from "react-dom";
 import Avatar from "../components/Avatar";
@@ -442,6 +442,51 @@ function Attachment({
   );
 }
 
+// Одно сообщение. Мемоизировано: набор текста, «печатает…» и новые сообщения
+// не перерисовывают уже показанные (если сам объект сообщения не изменился)
+const MessageItem = memo(function MessageItem({
+  message: m,
+  day,
+  deletable,
+  onZoom,
+  onAskDelete,
+  onRetry,
+}: {
+  message: ViewMessage<unknown>;
+  day: string | null;
+  deletable: boolean;
+  onZoom: (url: string) => void;
+  onAskDelete: (message: ViewMessage<unknown>) => void;
+  onRetry: (message: ViewMessage<unknown>) => void;
+}) {
+  return (
+    <div className="chat__item">
+      {day && <div className="chat__day">{day}</div>}
+      <div className={`msg-line ${m.out ? "msg-line--out" : ""}`}>
+        <div
+          className={`msg ${m.out ? "msg--out" : ""} ${m.state === "failed" ? "msg--failed" : ""} ${m.attachment || m.shared ? "msg--with-media" : ""}`}
+        >
+          {m.attachment && <Attachment attachment={m.attachment} pending={m.state === "pending"} onOpen={onZoom} />}
+          {m.text && <span className="msg__text">{m.text}</span>}
+          {m.shared && <SharedCard shared={m.shared} />}
+          <span className="msg__time">
+            {m.time}
+            {m.out && <MessageStatus state={m.state} />}
+          </span>
+        </div>
+        {m.state !== "pending" && (m.text || deletable) && (
+          <MessageActions message={m} onDeleteClick={deletable ? () => onAskDelete(m) : null} />
+        )}
+      </div>
+      {m.state === "failed" && (
+        <button className="msg__retry" onClick={() => onRetry(m)}>
+          Не отправлено. Повторить
+        </button>
+      )}
+    </div>
+  );
+});
+
 // Окно мессенджера.
 // dialog: { id, person: { name, color, avatar?, online }, unread, time, typing?,
 //           messages: [{ id, out, text, summary?, attachment?: { type, url, name? }, time, day?,
@@ -471,6 +516,13 @@ export default function Messenger<R>({
   startInChat?: boolean;
 }) {
   const [chatOpen, setChatOpen] = useState(startInChat);
+  // Колбэки для сообщений — постоянные, чтобы мемоизированные сообщения не перерисовывались
+  const onRetryRef = useRef(onRetry);
+  useEffect(() => {
+    onRetryRef.current = onRetry;
+  });
+  const retry = useCallback((m: ViewMessage<unknown>) => onRetryRef.current?.(m as ViewMessage<R>), []);
+  const askDelete = useCallback((m: ViewMessage<unknown>) => setToDelete(m as ViewMessage<R>), []);
   const [toDelete, setToDelete] = useState<ViewMessage<R> | null>(null); // сообщение, для которого открыто «Удалить?»
   const [text, setText] = useState("");
   const [folder, setFolder] = useState(folders[0]);
@@ -768,47 +820,15 @@ export default function Messenger<R>({
                 const showDay =
                   i === 0 || day !== (active.messages[i - 1].day ?? "Сегодня");
                 return (
-                  <div key={m.id} className="chat__item">
-                    {showDay && <div className="chat__day">{day}</div>}
-                    <div className={`msg-line ${m.out ? "msg-line--out" : ""}`}>
-                      <div
-                        className={`msg ${m.out ? "msg--out" : ""} ${m.state === "failed" ? "msg--failed" : ""} ${m.attachment || m.shared ? "msg--with-media" : ""}`}
-                      >
-                        {m.attachment && (
-                          <Attachment
-                            attachment={m.attachment}
-                            pending={m.state === "pending"}
-                            onOpen={setZoomUrl}
-                          />
-                        )}
-                        {m.text && <span className="msg__text">{m.text}</span>}
-                        {m.shared && <SharedCard shared={m.shared} />}
-                        <span className="msg__time">
-                          {m.time}
-                          {m.out && <MessageStatus state={m.state} />}
-                        </span>
-                      </div>
-                      {m.state !== "pending" &&
-                        (m.text || (onDelete && m.deletable !== false)) && (
-                          <MessageActions
-                            message={m}
-                            onDeleteClick={
-                              onDelete && m.deletable !== false
-                                ? () => setToDelete(m)
-                                : null
-                            }
-                          />
-                        )}
-                    </div>
-                    {m.state === "failed" && (
-                      <button
-                        className="msg__retry"
-                        onClick={() => onRetry?.(m)}
-                      >
-                        Не отправлено. Повторить
-                      </button>
-                    )}
-                  </div>
+                  <MessageItem
+                    key={m.id}
+                    message={m}
+                    day={showDay ? day : null}
+                    deletable={!!onDelete && m.deletable !== false}
+                    onZoom={setZoomUrl}
+                    onAskDelete={askDelete}
+                    onRetry={retry}
+                  />
                 );
               })
             ) : (

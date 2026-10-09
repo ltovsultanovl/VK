@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import Messenger, { type MessageState, type ViewDialog } from "./Messenger";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Messenger, { type MessageState, type ViewDialog, type ViewMessage } from "./Messenger";
 import type { MessageRow } from "../types";
 import { messageSummary, useChat } from "../context/ChatContext";
 import { formatDay, formatDialogTime, formatTime } from "../utils";
@@ -32,6 +32,10 @@ export default function OnlineMessenger() {
     retry,
   } = useChat();
 
+  // Готовые сообщения кешируем по исходной строке: если строка та же, отдаём тот же объект —
+  // тогда «печатает…», «в сети» и новые сообщения не перерисовывают уже показанные
+  const cache = useRef(new WeakMap<MessageRow, { url: string | null; view: ViewMessage<MessageRow> }>());
+
   // Данные Supabase → формат, который понимает Messenger
   const view = useMemo(
     () =>
@@ -44,7 +48,10 @@ export default function OnlineMessenger() {
         time: formatDialogTime(d.last?.created_at),
         messages: d.messages.map((m) => {
           const out = m.sender_id === myId;
-          return {
+          const url = m.localUrl ?? (m.attachment_path ? fileUrls[m.attachment_path] : null) ?? null;
+          const cached = cache.current.get(m);
+          if (cached && cached.url === url) return cached.view;
+          const message: ViewMessage<MessageRow> = {
             id: m.id,
             out,
             text: m.text,
@@ -54,7 +61,7 @@ export default function OnlineMessenger() {
                   type: m.attachment_type,
                   name: m.attachment_name,
                   meta: m.attachment_meta,
-                  url: m.localUrl ?? (m.attachment_path ? fileUrls[m.attachment_path] : null) ?? null,
+                  url,
                 }
               : null,
             shared: m.shared_type && m.shared_id ? { type: m.shared_type, id: m.shared_id } : null,
@@ -69,6 +76,8 @@ export default function OnlineMessenger() {
               Date.now() - new Date(m.created_at).getTime() < DAY_MS,
             raw: m,
           };
+          cache.current.set(m, { url, view: message });
+          return message;
         }),
       })),
     [dialogs, myId, fileUrls],

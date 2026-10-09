@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Avatar from "../components/Avatar";
 import Composer from "../components/Composer";
 import PostList from "../components/PostList";
@@ -23,7 +23,7 @@ import {
 } from "../components/Icons";
 import { useProfile } from "../context/ProfileContext";
 import { useCommunities } from "../context/CommunitiesContext";
-import { useChat } from "../context/ChatContext";
+import { useChatActions } from "../context/ChatContext";
 import { useDropdown, useFilePicker } from "../hooks";
 import { usePhotos, usePosts, useResource } from "../resources";
 import { bg } from "../data";
@@ -260,17 +260,17 @@ function CommunityWall({
   const published = usePosts({ community: community.id });
   const suggested = usePosts({ community: community.id, suggested: true });
   // Одобренная новость переезжает из «Предложенных» в записи сообщества
-  const feed =
-    tab === "posts"
-      ? published
-      : {
-          ...suggested,
-          approve: async (post: Post) => {
-            const ok = await suggested.approve(post);
-            if (ok) published.reload();
-            return ok;
-          },
-        };
+  const approveSuggested = suggested.approve;
+  const reloadPublished = published.reload;
+  const approve = useCallback(
+    async (post: Post) => {
+      const ok = await approveSuggested(post);
+      if (ok) reloadPublished();
+      return ok;
+    },
+    [approveSuggested, reloadPublished],
+  );
+  const feed = tab === "posts" ? published : { ...suggested, approve };
 
   const isMember = !!role;
   const openWall = !community.isPage && community.wall === "open";
@@ -468,7 +468,7 @@ export default function Community({ id, onNavigate }: { id: number; onNavigate: 
     canPublishIn,
     canManage: canManageIn,
   } = useCommunities();
-  const { openCommunityChat } = useChat();
+  const { openCommunityChat } = useChatActions();
   const showSnackbar = useSnackbar();
   const menu = useDropdown();
   const [modal, setModal] = useState<"share" | "invite" | null>(null);

@@ -1,6 +1,6 @@
 // Загрузка данных с сервера для страниц: loading / error / пусто — и действия
 // с оптимистичным обновлением (интерфейс меняется сразу, при ошибке — откат)
-import { useCallback, useEffect, useState, type DependencyList } from "react";
+import { useCallback, useEffect, useMemo, useState, type DependencyList } from "react";
 import * as api from "./api";
 import type { Album, Comment, Person, Photo, Post } from "./types";
 import { useProfile } from "./context/ProfileContext";
@@ -106,7 +106,9 @@ export function usePosts(source: PostSource) {
     [showSnackbar, reload],
   );
 
-  const actions = {
+  // Действия постоянные (useMemo) — мемоизированные посты не перерисовываются от каждого рендера списка
+  const actions = useMemo(
+    () => ({
     // На стену человека (ownerId) или сообщества (communityId, asCommunity, suggested)
     publish: async ({ ownerId, communityId, asCommunity, suggested, text, imageDataUrl }: PublishData) => {
       try {
@@ -199,7 +201,9 @@ export function usePosts(source: PostSource) {
         fail(e, "Не удалось закрепить запись");
       }
     },
-  };
+    }),
+    [myId, showSnackbar, setData, update, patchPost, fail, reload, forSuggested],
+  );
 
   return { ...resource, posts: resource.data ?? [], ...actions };
 }

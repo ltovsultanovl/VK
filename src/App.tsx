@@ -1,21 +1,10 @@
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { lazyPage } from "./lazyPage";
 import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
 import Splash from "./components/Splash";
 import ErrorBoundary from "./components/ErrorBoundary";
-import Feed from "./pages/Feed";
-import Profile from "./pages/Profile";
-import OnlineMessenger from "./pages/OnlineMessenger";
-import Friends from "./pages/Friends";
-import Communities from "./pages/Communities";
-import Photos from "./pages/Photos";
-import Music from "./pages/Music";
-import Video from "./pages/Video";
-import Notifications from "./pages/Notifications";
 import MobileNav from "./components/MobileNav";
-import Community from "./pages/Community";
-import CommunityManage from "./pages/CommunityManage";
-import EditProfile from "./pages/EditProfile";
 import AuthPage from "./pages/AuthPage";
 import SetupNeeded from "./pages/SetupNeeded";
 import NewPassword from "./pages/NewPassword";
@@ -26,13 +15,28 @@ import {
   CommunitiesProvider,
   useCommunities,
 } from "./context/CommunitiesContext";
-import { ChatProvider, useChat } from "./context/ChatContext";
+import { ChatProvider, useChatUnread } from "./context/ChatContext";
 import { PlayerProvider } from "./context/PlayerContext";
 import { MusicProvider } from "./context/MusicContext";
 import { VideoProvider } from "./context/VideoContext";
 import { NotificationsProvider } from "./context/NotificationsContext";
 import { supabaseConfigured } from "./lib/supabase";
 import { useStoredState } from "./hooks";
+
+// Страницы грузятся отдельными файлами — первый экран открывается быстрее
+const Feed = lazyPage(() => import("./pages/Feed"));
+const Profile = lazyPage(() => import("./pages/Profile"));
+const OnlineMessenger = lazyPage(() => import("./pages/OnlineMessenger"));
+const Friends = lazyPage(() => import("./pages/Friends"));
+const Communities = lazyPage(() => import("./pages/Communities"));
+const Photos = lazyPage(() => import("./pages/Photos"));
+const Music = lazyPage(() => import("./pages/Music"));
+const Video = lazyPage(() => import("./pages/Video"));
+const Notifications = lazyPage(() => import("./pages/Notifications"));
+const Community = lazyPage(() => import("./pages/Community"));
+const CommunityManage = lazyPage(() => import("./pages/CommunityManage"));
+const EditProfile = lazyPage(() => import("./pages/EditProfile"));
+
 
 // Тему до отрисовки уже поставил скрипт в index.html (с учётом системной)
 type Theme = "light" | "dark";
@@ -71,6 +75,14 @@ const readRoute = () => {
   };
 };
 
+function PageLoading() {
+  return (
+    <div className="card list-state" role="status" aria-label="Загрузка">
+      <div className="chat-status__spinner" />
+    </div>
+  );
+}
+
 function PageError({ onRetry }: { onRetry: () => void }) {
   return (
     <div className="card error-screen" role="alert">
@@ -90,7 +102,7 @@ function PageError({ onRetry }: { onRetry: () => void }) {
 function Shell({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => void }) {
   const { myId } = useProfile();
   const { incoming } = useFriends();
-  const chat = useChat();
+  const unreadMessages = useChatUnread();
   const [route, setRoute] = useState(readRoute);
 
   useEffect(() => {
@@ -129,7 +141,7 @@ function Shell({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => vo
           view={profileId === myId ? "profile" : view}
           onNavigate={navigate}
           counters={{
-            messages: chat.unreadTotal,
+            messages: unreadMessages,
             friends: incoming.length,
             communities: invitations.length,
           }}
@@ -139,6 +151,7 @@ function Shell({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => vo
             key={`${view}/${param}/${sub}`}
             fallback={(reset) => <PageError onRetry={reset} />}
           >
+            <Suspense fallback={<PageLoading />}>
             {view === "feed" && <Feed />}
             {profileId && (
               <Profile
@@ -196,6 +209,7 @@ function Shell({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => vo
                 onNavigate={navigate}
               />
             )}
+            </Suspense>
           </ErrorBoundary>
         </main>
       </div>
@@ -203,7 +217,7 @@ function Shell({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => vo
         view={profileId === myId ? "profile" : view}
         onNavigate={navigate}
         counters={{
-          messages: chat.unreadTotal,
+          messages: unreadMessages,
           friends: incoming.length,
           communities: invitations.length,
         }}

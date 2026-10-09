@@ -64,6 +64,13 @@ interface ChatValue {
 
 const ChatContext = createContext<ChatValue | null>(null);
 
+// Отдельно — то, что нужно многим, но меняется редко: число непрочитанных (меню, нижняя панель)
+// и действия (кнопки «Написать сообщение»). Подписчики не перерисовываются от «печатает…» и «в сети»
+const ChatUnreadContext = createContext(0);
+type ChatActions = Pick<ChatValue, "openChat" | "openCommunityChat" | "sendMessage">;
+const ChatActionsContext = createContext<ChatActions | null>(null);
+const OnlineContext = createContext<Set<string>>(new Set());
+
 const TYPING_TIMEOUT = 3500; // столько держится «печатает…» после последнего нажатия
 const TYPING_THROTTLE = 2000; // не чаще раза в 2 с шлём «я печатаю»
 const MESSAGES_LIMIT = 1000;
@@ -117,6 +124,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // Переписки с сообществами (я — собеседник): сообщения и сами сообщества
   const [clubMessages, setClubMessages] = useState<CommunityMessageRow[]>([]);
   const [clubs, setClubs] = useState<Record<number, ClubInfo>>({});
+  // Переписка с сообществом приводится к виду обычных сообщений; кешируем, чтобы объекты не менялись зря
+  const clubRows = useRef(new WeakMap<CommunityMessageRow, MessageRow>());
   const clubsRef = useRef(clubs);
   useEffect(() => {
     clubsRef.current = clubs;
@@ -490,8 +499,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           const peer = `club:${club.id}`;
           const thread = clubMessages
             .filter((m) => m.community_id === club.id)
-            .map(
-              (m): MessageRow => ({
+            .map((m): MessageRow => {
+              const cached = clubRows.current.get(m);
+              if (cached) return cached;
+              const row: MessageRow = {
                 id: m.id,
                 text: m.text,
                 created_at: m.created_at,
@@ -501,8 +512,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 failed: m.failed,
                 sender_id: m.from_community ? peer : myId,
                 recipient_id: m.from_community ? myId : peer,
-              }),
-            );
+              };
+              clubRows.current.set(m, row);
+              return row;
+            });
           return {
             person: { id: peer, name: club.name, color: club.color, avatar: club.avatar, online: false, isCommunity: true, communityId: club.id },
             messages: thread,
@@ -545,7 +558,33 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [status, error, myId, dialogs, fileUrls, unreadTotal, onlineIds, activePeerId, openChat, openCommunityChat, sendMessage, retryMessage, deleteMessage, markRead, sendTyping, retry],
   );
 
-  return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
+  const actions = useMemo<ChatActions>(
+    () => ({ openChat, openCommunityChat, sendMessage }),
+    [openChat, openCommunityChat, sendMessage],
+  );
+
+  return (
+    <ChatContext.Provider value={value}>
+      <ChatActionsContext.Provider value={actions}>
+        <ChatUnreadContext.Provider value={unreadTotal}>
+          <OnlineContext.Provider value={onlineIds}>{children}</OnlineContext.Provider>
+        </ChatUnreadContext.Provider>
+      </ChatActionsContext.Provider>
+    </ChatContext.Provider>
+  );
+}
+
+// Число непрочитанных сообщений
+export const useChatUnread = () => useContext(ChatUnreadContext);
+
+// Кто сейчас в сети
+export const useOnlineIds = () => useContext(OnlineContext);
+
+// Только действия: открыть чат, отправить сообщение
+export function useChatActions() {
+  const context = useContext(ChatActionsContext);
+  if (!context) throw new Error("useChatActions нужно вызывать внутри <ChatProvider>");
+  return context;
 }
 
 export function useChat() {

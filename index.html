@@ -6,19 +6,10 @@
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#19191a" media="(prefers-color-scheme: dark)">
   <title>Сеть — социальная сеть</title>
-  <script>
-    // Тему ставим до загрузки React, чтобы тёмная тема не мигала светлой.
-    // Сохранённое значение — JSON ("dark"), у старых сохранений — просто dark
-    {
-      let saved = null;
-      try {
-        const raw = localStorage.getItem("theme");
-        saved = raw && raw.startsWith('"') ? JSON.parse(raw) : raw;
-      } catch {}
-      const prefersDark = matchMedia("(prefers-color-scheme: dark)").matches;
-      document.documentElement.dataset.theme = saved || (prefersDark ? "dark" : "light");
-    }
-  </script>
+  <meta name="description" content="Социальная сеть: друзья, сообщения, сообщества, фото, музыка и видео">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="apple-touch-icon" href="/favicon.svg">
+  <script src="/theme.js"></script>
 </head>
 <body>
   <div id="root"></div>

@@ -33,7 +33,7 @@ import {
 } from "../components/Icons";
 import { useProfile } from "../context/ProfileContext";
 import { useFriends } from "../context/FriendsContext";
-import { useChat } from "../context/ChatContext";
+import { useChatActions, useOnlineIds } from "../context/ChatContext";
 import { bg } from "../data";
 import { formatEducation, fullName } from "../profile";
 import { useDismiss, useDropdown, useFileDrop, useFilePicker } from "../hooks";
@@ -159,7 +159,7 @@ function ProfileAvatar({
   album: PhotoAlbum;
 }) {
   const { updateProfile } = useProfile();
-  const { onlineIds } = useChat();
+  const onlineIds = useOnlineIds();
   const showSnackbar = useSnackbar();
   const [modal, setModal] = useState<"upload" | "delete" | null>(null);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
@@ -750,7 +750,7 @@ function SubscriptionsCard({ userId, isMe }: { userId: string; isMe: boolean }) 
 export default function Profile({ userId, onNavigate }: { userId: string; onNavigate: Navigate }) {
   const { myId, profile: myProfile } = useProfile();
   const { relationTo } = useFriends();
-  const { openChat } = useChat();
+  const { openChat } = useChatActions();
   const isMe = userId === myId;
   const other = useUserProfile(isMe ? myId : userId);
   const profile = isMe ? myProfile : other.data;

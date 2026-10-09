@@ -1143,6 +1143,7 @@ textarea {
 .messenger {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
+  height: calc(100vh - var(--header-total) - 32px); /* запасной вариант для старых браузеров */
   height: calc(100dvh - var(--header-total) - 32px);
   min-height: 480px;
   overflow: hidden;
@@ -5436,6 +5437,7 @@ button.shared--state {
   /* Мессенджер: сначала список чатов, по тапу — чат с кнопкой «назад» */
   .messenger {
     grid-template-columns: minmax(0, 1fr);
+    height: calc(100vh - var(--header-total) - var(--nav-h) - 16px - var(--safe-bottom)); /* запасной вариант для старых браузеров */
     height: calc(100dvh - var(--header-total) - var(--nav-h) - 16px - var(--safe-bottom));
     min-height: 0;
   }
@@ -5461,6 +5463,7 @@ button.shared--state {
   }
   .modal {
     max-width: 100%;
+    max-height: calc(100vh - 16px); /* запасной вариант для старых браузеров */
     max-height: calc(100dvh - 16px);
   }
   .columns__side .card,
@@ -5583,6 +5586,7 @@ textarea {
     top: calc(var(--header-total) + 8px);
   }
   .notif-panel {
+    max-height: calc(100vh - var(--header-total) - var(--nav-h) - 24px - var(--safe-bottom)); /* запасной вариант для старых браузеров */
     max-height: calc(100dvh - var(--header-total) - var(--nav-h) - 24px - var(--safe-bottom));
   }
 }
@@ -5699,6 +5703,7 @@ textarea {
   .video-viewer__box {
     grid-template-columns: minmax(0, 1fr) min(340px, 42%);
     grid-template-rows: none;
+    height: 100vh; /* запасной вариант для старых браузеров */
     height: 100dvh;
     border-radius: 0;
   }
@@ -5707,13 +5712,16 @@ textarea {
   }
   .video-viewer__stage {
     aspect-ratio: auto;
+    height: 100vh; /* запасной вариант для старых браузеров */
     height: 100dvh;
     max-height: none;
   }
   .modal {
+    max-height: calc(100vh - 16px); /* запасной вариант для старых браузеров */
     max-height: calc(100dvh - 16px);
   }
   .sheet {
+    max-height: 100vh; /* запасной вариант для старых браузеров */
     max-height: 100dvh;
   }
 }

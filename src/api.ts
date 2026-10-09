@@ -187,6 +187,7 @@ export const explainError = (error: unknown): string => {
   if (/expired|invalid.*(token|otp)|token.*invalid/i.test(text)) return "Код неверный или устарел. Запросите новый";
   if (/find_profile_by_email/i.test(text)) return "Поиск по почте ещё не включён: выполните обновлённый supabase/schema.sql в SQL Editor";
   if (/row-level security|permission denied/i.test(text)) return "Нет прав на это действие";
+  if (/violates check constraint/i.test(text)) return "Некорректные данные — проверьте, что всё заполнено правильно";
   if (
     /Bucket not found|Could not find the function|column .* does not exist|in the schema cache/i.test(text) ||
     ["42703", "PGRST202", "PGRST204"].includes(err?.code ?? "")

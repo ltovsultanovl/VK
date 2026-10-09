@@ -120,27 +120,8 @@ create index if not exists posts_created_idx on public.posts (created_at desc);
 
 alter table public.posts enable row level security;
 
-drop policy if exists "Посты видны всем" on public.posts;
-create policy "Посты видны всем" on public.posts
-  for select to authenticated using (true);
-
-drop policy if exists "Писать можно на своей стене и у друзей" on public.posts;
-create policy "Писать можно на своей стене и у друзей" on public.posts
-  for insert to authenticated
-  with check (
-    author_id = (select auth.uid())
-    and (owner_id = (select auth.uid()) or public.are_friends((select auth.uid()), owner_id))
-  );
-
-drop policy if exists "Закрепляет владелец стены" on public.posts;
-create policy "Закрепляет владелец стены" on public.posts
-  for update to authenticated
-  using (owner_id = (select auth.uid())) with check (owner_id = (select auth.uid()));
-
-drop policy if exists "Удаляет автор или владелец стены" on public.posts;
-create policy "Удаляет автор или владелец стены" on public.posts
-  for delete to authenticated
-  using ((select auth.uid()) in (author_id, owner_id));
+-- Правила доступа к постам — в разделе «Сообщества» в конце файла:
+-- пост может лежать на стене человека или сообщества
 
 revoke update on public.posts from authenticated;
 grant update (pinned) on public.posts to authenticated;
@@ -186,16 +167,7 @@ drop policy if exists "Комментирует сам пользователь"
 create policy "Комментирует сам пользователь" on public.post_comments
   for insert to authenticated with check (author_id = (select auth.uid()));
 
-drop policy if exists "Удаляет автор комментария или владелец стены" on public.post_comments;
-create policy "Удаляет автор комментария или владелец стены" on public.post_comments
-  for delete to authenticated
-  using (
-    author_id = (select auth.uid())
-    or exists (
-      select 1 from public.posts p
-      where p.id = post_id and p.owner_id = (select auth.uid())
-    )
-  );
+-- Удаление комментариев — в разделе «Сообщества» (там учитываются админы сообществ)
 
 -- =====================================================================
 -- Фотографии, их лайки и комментарии
@@ -212,17 +184,7 @@ create index if not exists photos_owner_idx on public.photos (owner_id, created_
 
 alter table public.photos enable row level security;
 
-drop policy if exists "Фото видны всем" on public.photos;
-create policy "Фото видны всем" on public.photos
-  for select to authenticated using (true);
-
-drop policy if exists "Добавляет фото владелец" on public.photos;
-create policy "Добавляет фото владелец" on public.photos
-  for insert to authenticated with check (owner_id = (select auth.uid()));
-
-drop policy if exists "Удаляет фото владелец" on public.photos;
-create policy "Удаляет фото владелец" on public.photos
-  for delete to authenticated using (owner_id = (select auth.uid()));
+-- Правила доступа к фото — в разделе «Сообщества» (у сообществ есть свои фотографии)
 
 create table if not exists public.photo_likes (
   photo_id bigint not null references public.photos (id) on delete cascade,
@@ -387,7 +349,8 @@ alter table public.messages add constraint messages_content_check check (
   and (attachment_name is null or char_length(attachment_name) <= 200)
   and (attachment_meta is null or pg_column_size(attachment_meta) <= 4096)
   and (shared_type is null) = (shared_id is null)
-  and (shared_type is null or shared_type in ('post', 'photo', 'profile'))
+  -- все типы «Поделиться» здесь: при повторном запуске файла старые сообщения должны проходить проверку
+  and (shared_type is null or shared_type in ('post', 'photo', 'profile', 'community', 'audio', 'playlist', 'video'))
   and (shared_id is null or char_length(shared_id) <= 64)
 );
 
@@ -493,3 +456,932 @@ revoke execute on function public.delete_message_for_me(bigint) from public, ano
 revoke execute on function public.delete_message_for_all(bigint) from public, anon;
 grant execute on function public.delete_message_for_me(bigint) to authenticated;
 grant execute on function public.delete_message_for_all(bigint) to authenticated;
+
+-- =====================================================================
+-- Сообщества, как в VK.
+--   kind:   group — группа (участники), page — публичная страница (подписчики)
+--   access: open — вступает кто угодно; closed — по заявке; private — только по приглашению.
+--           Публичная страница всегда открытая
+--   wall:   open — участники группы пишут на стене от себя; limited — пишут только админы,
+--           участники могут «предложить новость»
+-- Состав и роли меняются только через функции ниже — так правила VK не обойти
+-- =====================================================================
+create table if not exists public.communities (
+  id bigint generated always as identity primary key,
+  name text not null check (char_length(name) between 2 and 64),
+  kind text not null default 'group' check (kind in ('group', 'page')),
+  access text not null default 'open' check (access in ('open', 'closed', 'private')),
+  wall text not null default 'limited' check (wall in ('open', 'limited')),
+  category text not null default '' check (char_length(category) <= 64),
+  status text not null default '' check (char_length(status) <= 140),
+  description text not null default '' check (char_length(description) <= 4000),
+  website text not null default '' check (char_length(website) <= 200),
+  city text not null default '' check (char_length(city) <= 64),
+  color text not null default '#5181b8',
+  avatar_url text,
+  cover_url text,
+  messages_enabled boolean not null default true,
+  created_by uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  check (kind = 'group' or access = 'open'),
+  check (kind = 'group' or wall = 'limited')
+);
+
+create index if not exists communities_name_idx on public.communities (lower(name));
+
+create table if not exists public.community_members (
+  community_id bigint not null references public.communities (id) on delete cascade,
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  role text not null default 'member' check (role in ('owner', 'admin', 'editor', 'member')),
+  -- member — в сообществе; requested — заявка в закрытую группу; invited — приглашение
+  status text not null default 'member' check (status in ('member', 'requested', 'invited')),
+  created_at timestamptz not null default now(),
+  primary key (community_id, user_id),
+  check (status = 'member' or role = 'member')
+);
+
+create index if not exists community_members_user_idx on public.community_members (user_id, status);
+
+-- ---------- Проверки прав (security definer — чтобы правила не зацикливались) ----------
+create or replace function public.community_role(c bigint, u uuid)
+returns text
+language sql stable security definer set search_path = public
+as $$
+  select role from public.community_members where community_id = c and user_id = u and status = 'member';
+$$;
+
+-- Видеть записи, фото и участников: открытое сообщество — все, иначе только участники
+create or replace function public.can_view_community(c bigint, u uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (select 1 from public.communities where id = c and access = 'open')
+      or public.community_role(c, u) is not null;
+$$;
+
+-- Публиковать от имени сообщества и отвечать на сообщения: владелец, админы, редакторы
+create or replace function public.can_publish_in_community(c bigint, u uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select coalesce(public.community_role(c, u) in ('owner', 'admin', 'editor'), false);
+$$;
+
+-- Управлять настройками и участниками: владелец и админы
+create or replace function public.can_manage_community(c bigint, u uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select coalesce(public.community_role(c, u) in ('owner', 'admin'), false);
+$$;
+
+-- Создатель сразу становится владельцем
+create or replace function public.community_add_owner()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  insert into public.community_members (community_id, user_id, role, status)
+  values (new.id, new.created_by, 'owner', 'member');
+  return new;
+end;
+$$;
+
+drop trigger if exists community_add_owner on public.communities;
+create trigger community_add_owner after insert on public.communities
+  for each row execute function public.community_add_owner();
+
+-- ---------- Правила доступа ----------
+alter table public.communities enable row level security;
+alter table public.community_members enable row level security;
+
+drop policy if exists "Сообщества видны всем, частные — только своим" on public.communities;
+create policy "Сообщества видны всем, частные — только своим" on public.communities
+  for select to authenticated
+  using (
+    access <> 'private'
+    or created_by = (select auth.uid()) -- создатель видит своё сообщество сразу, ещё до записи «владелец»
+    or exists (
+      select 1 from public.community_members m
+      where m.community_id = id and m.user_id = (select auth.uid())
+    )
+  );
+
+drop policy if exists "Создаёт сообщество сам пользователь" on public.communities;
+create policy "Создаёт сообщество сам пользователь" on public.communities
+  for insert to authenticated with check (created_by = (select auth.uid()));
+
+drop policy if exists "Настройки меняют владелец и админы" on public.communities;
+create policy "Настройки меняют владелец и админы" on public.communities
+  for update to authenticated
+  using (public.can_manage_community(id, (select auth.uid())))
+  with check (public.can_manage_community(id, (select auth.uid())));
+
+drop policy if exists "Удаляет сообщество только владелец" on public.communities;
+create policy "Удаляет сообщество только владелец" on public.communities
+  for delete to authenticated
+  using (public.community_role(id, (select auth.uid())) = 'owner');
+
+revoke update on public.communities from authenticated;
+grant update (name, access, wall, category, status, description, website, city, color, avatar_url, cover_url, messages_enabled)
+  on public.communities to authenticated;
+
+drop policy if exists "Участников видно, если видно сообщество" on public.community_members;
+create policy "Участников видно, если видно сообщество" on public.community_members
+  for select to authenticated
+  using (user_id = (select auth.uid()) or public.can_view_community(community_id, (select auth.uid())));
+
+-- Менять состав напрямую нельзя — только функциями ниже
+revoke insert, update, delete on public.community_members from authenticated;
+
+-- ---------- Функции: вступить, выйти, пригласить, заявки, роли ----------
+
+-- Вступить / подписаться. Возвращает новый статус: member или requested.
+-- Приглашённый в любую группу (в том числе частную) этим же вызовом принимает приглашение
+create or replace function public.join_community(c bigint)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  me uuid := auth.uid();
+  a text;
+  cur public.community_members;
+begin
+  if me is null then raise exception 'Нужно войти'; end if;
+  select access into a from public.communities where id = c;
+  if a is null then raise exception 'Сообщество не найдено'; end if;
+
+  select * into cur from public.community_members where community_id = c and user_id = me;
+  if found then
+    if cur.status = 'invited' then
+      update public.community_members set status = 'member', created_at = now()
+      where community_id = c and user_id = me;
+      return 'member';
+    end if;
+    return cur.status;
+  end if;
+
+  if a = 'private' then
+    raise exception 'Это частная группа — вступить можно только по приглашению';
+  end if;
+  insert into public.community_members (community_id, user_id, status)
+  values (c, me, case when a = 'open' then 'member' else 'requested' end);
+  return case when a = 'open' then 'member' else 'requested' end;
+end;
+$$;
+
+-- Выйти / отписаться / отменить заявку / отклонить приглашение
+create or replace function public.leave_community(c bigint)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if public.community_role(c, auth.uid()) = 'owner' then
+    raise exception 'Владелец не может выйти из своего сообщества — его можно только удалить';
+  end if;
+  delete from public.community_members where community_id = c and user_id = auth.uid();
+end;
+$$;
+
+-- Пригласить друга: может любой участник
+create or replace function public.invite_to_community(c bigint, u uuid)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if public.community_role(c, auth.uid()) is null then
+    raise exception 'Приглашать могут только участники сообщества';
+  end if;
+  if not public.are_friends(auth.uid(), u) then
+    raise exception 'Пригласить можно только друга';
+  end if;
+  insert into public.community_members (community_id, user_id, status)
+  values (c, u, 'invited')
+  on conflict (community_id, user_id) do nothing;
+end;
+$$;
+
+-- Принять или отклонить заявку в закрытую группу: владелец и админы
+create or replace function public.answer_community_request(c bigint, u uuid, accept boolean)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not public.can_manage_community(c, auth.uid()) then
+    raise exception 'Заявки принимают только владелец и администраторы';
+  end if;
+  if accept then
+    update public.community_members set status = 'member', created_at = now()
+    where community_id = c and user_id = u and status = 'requested';
+  else
+    delete from public.community_members where community_id = c and user_id = u and status = 'requested';
+  end if;
+end;
+$$;
+
+-- Назначить роль. Владелец назначает админов и редакторов,
+-- админ — только редакторов и только среди обычных участников и редакторов
+create or replace function public.set_community_role(c bigint, u uuid, r text)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  my_role text := public.community_role(c, auth.uid());
+  their_role text := public.community_role(c, u);
+begin
+  if r not in ('admin', 'editor', 'member') then raise exception 'Неизвестная роль'; end if;
+  if their_role is null then raise exception 'Человек не состоит в сообществе'; end if;
+  if their_role = 'owner' then raise exception 'Роль владельца изменить нельзя'; end if;
+  if my_role = 'owner' then
+    null;
+  elsif my_role = 'admin' and r <> 'admin' and their_role in ('editor', 'member') then
+    null;
+  else
+    raise exception 'Недостаточно прав, чтобы назначить эту роль';
+  end if;
+  update public.community_members set role = r where community_id = c and user_id = u;
+end;
+$$;
+
+-- Удалить участника (или отозвать приглашение). Админа может удалить только владелец
+create or replace function public.remove_from_community(c bigint, u uuid)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  my_role text := public.community_role(c, auth.uid());
+  their_role text := (select role from public.community_members where community_id = c and user_id = u);
+begin
+  if my_role not in ('owner', 'admin') or my_role is null then
+    raise exception 'Удалять участников могут только владелец и администраторы';
+  end if;
+  if their_role = 'owner' then raise exception 'Владельца удалить нельзя'; end if;
+  if their_role = 'admin' and my_role <> 'owner' then
+    raise exception 'Администратора может удалить только владелец';
+  end if;
+  delete from public.community_members where community_id = c and user_id = u;
+end;
+$$;
+
+-- ---------- Посты: стена человека или сообщества ----------
+alter table public.posts alter column owner_id drop not null;
+alter table public.posts add column if not exists community_id bigint references public.communities (id) on delete cascade;
+-- as_community — опубликовано от имени сообщества; suggested — «предложенная новость», ждёт админа
+alter table public.posts add column if not exists as_community boolean not null default false;
+alter table public.posts add column if not exists suggested boolean not null default false;
+
+alter table public.posts drop constraint if exists posts_wall_check;
+alter table public.posts add constraint posts_wall_check check (
+  (owner_id is null) <> (community_id is null)
+  and (community_id is not null or (not as_community and not suggested))
+  and not (as_community and suggested)
+);
+
+create index if not exists posts_community_idx on public.posts (community_id, created_at desc);
+
+drop policy if exists "Посты видны всем" on public.posts;
+drop policy if exists "Посты видны, если видно сообщество" on public.posts;
+create policy "Посты видны, если видно сообщество" on public.posts
+  for select to authenticated
+  using (
+    community_id is null
+    or (
+      public.can_view_community(community_id, (select auth.uid()))
+      and (
+        not suggested
+        or author_id = (select auth.uid())
+        or public.can_publish_in_community(community_id, (select auth.uid()))
+      )
+    )
+  );
+
+drop policy if exists "Писать можно на своей стене и у друзей" on public.posts;
+drop policy if exists "Кто где может публиковать" on public.posts;
+create policy "Кто где может публиковать" on public.posts
+  for insert to authenticated
+  with check (
+    author_id = (select auth.uid())
+    and (
+      -- стена человека: своя или друга
+      (
+        community_id is null
+        and (owner_id = (select auth.uid()) or public.are_friends((select auth.uid()), owner_id))
+      )
+      -- от имени сообщества: владелец, админы, редакторы
+      or (as_community and public.can_publish_in_community(community_id, (select auth.uid())))
+      -- «предложить новость»: любой участник
+      or (suggested and public.community_role(community_id, (select auth.uid())) is not null)
+      -- от себя на открытой стене группы: участники
+      or (
+        community_id is not null and not as_community and not suggested
+        and public.community_role(community_id, (select auth.uid())) is not null
+        and exists (
+          select 1 from public.communities c
+          where c.id = community_id and c.kind = 'group' and c.wall = 'open'
+        )
+      )
+    )
+  );
+
+drop policy if exists "Закрепляет владелец стены" on public.posts;
+create policy "Закрепляет владелец стены" on public.posts
+  for update to authenticated
+  using (
+    owner_id = (select auth.uid())
+    or public.can_manage_community(community_id, (select auth.uid()))
+  )
+  with check (
+    owner_id = (select auth.uid())
+    or public.can_manage_community(community_id, (select auth.uid()))
+  );
+
+drop policy if exists "Удаляет автор или владелец стены" on public.posts;
+create policy "Удаляет автор или владелец стены" on public.posts
+  for delete to authenticated
+  using (
+    (select auth.uid()) in (author_id, owner_id)
+    or public.can_publish_in_community(community_id, (select auth.uid()))
+  );
+
+-- Опубликовать предложенную новость от имени сообщества
+create or replace function public.approve_suggested_post(p bigint)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  c bigint := (select community_id from public.posts where id = p and suggested);
+begin
+  if c is null then raise exception 'Предложенная запись не найдена'; end if;
+  if not public.can_publish_in_community(c, auth.uid()) then
+    raise exception 'Публиковать предложенные записи могут только руководители сообщества';
+  end if;
+  update public.posts set suggested = false, as_community = true, created_at = now() where id = p;
+end;
+$$;
+
+drop policy if exists "Удаляет автор комментария или владелец стены" on public.post_comments;
+create policy "Удаляет автор комментария или владелец стены" on public.post_comments
+  for delete to authenticated
+  using (
+    author_id = (select auth.uid())
+    or exists (
+      select 1 from public.posts p
+      where p.id = post_id
+        and (p.owner_id = (select auth.uid()) or public.can_publish_in_community(p.community_id, (select auth.uid())))
+    )
+  );
+
+-- ---------- Фотографии сообщества ----------
+alter table public.photos add column if not exists community_id bigint references public.communities (id) on delete cascade;
+create index if not exists photos_community_idx on public.photos (community_id, created_at desc);
+
+drop policy if exists "Фото видны всем" on public.photos;
+drop policy if exists "Фото видны, если видно сообщество" on public.photos;
+create policy "Фото видны, если видно сообщество" on public.photos
+  for select to authenticated
+  using (community_id is null or public.can_view_community(community_id, (select auth.uid())));
+
+drop policy if exists "Добавляет фото владелец" on public.photos;
+create policy "Добавляет фото владелец" on public.photos
+  for insert to authenticated
+  with check (
+    owner_id = (select auth.uid())
+    and (community_id is null or public.can_publish_in_community(community_id, (select auth.uid())))
+  );
+
+drop policy if exists "Удаляет фото владелец" on public.photos;
+create policy "Удаляет фото владелец" on public.photos
+  for delete to authenticated
+  using (
+    owner_id = (select auth.uid())
+    or public.can_manage_community(community_id, (select auth.uid()))
+  );
+
+-- ---------- Сообщения сообществу ----------
+-- Переписка человека с сообществом. От имени сообщества отвечают владелец, админы и редакторы
+create table if not exists public.community_messages (
+  id bigint generated always as identity primary key,
+  community_id bigint not null references public.communities (id) on delete cascade,
+  user_id uuid not null references public.profiles (id) on delete cascade, -- собеседник сообщества
+  author_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  from_community boolean not null default false,
+  text text not null check (char_length(text) between 1 and 4000),
+  created_at timestamptz not null default now(),
+  read_at timestamptz -- прочитано другой стороной
+);
+
+create index if not exists community_messages_dialog_idx on public.community_messages (community_id, user_id, created_at);
+create index if not exists community_messages_user_idx on public.community_messages (user_id, created_at);
+
+alter table public.community_messages enable row level security;
+
+drop policy if exists "Переписку видят собеседник и руководители" on public.community_messages;
+create policy "Переписку видят собеседник и руководители" on public.community_messages
+  for select to authenticated
+  using (
+    user_id = (select auth.uid())
+    or public.can_publish_in_community(community_id, (select auth.uid()))
+  );
+
+drop policy if exists "Писать сообществу и отвечать от его имени" on public.community_messages;
+create policy "Писать сообществу и отвечать от его имени" on public.community_messages
+  for insert to authenticated
+  with check (
+    author_id = (select auth.uid())
+    and (
+      (
+        not from_community and user_id = (select auth.uid())
+        and exists (select 1 from public.communities c where c.id = community_id and c.messages_enabled)
+      )
+      or (from_community and public.can_publish_in_community(community_id, (select auth.uid())))
+    )
+  );
+
+drop policy if exists "Прочитанным отмечает другая сторона" on public.community_messages;
+create policy "Прочитанным отмечает другая сторона" on public.community_messages
+  for update to authenticated
+  using (
+    (from_community and user_id = (select auth.uid()))
+    or (not from_community and public.can_publish_in_community(community_id, (select auth.uid())))
+  )
+  with check (
+    (from_community and user_id = (select auth.uid()))
+    or (not from_community and public.can_publish_in_community(community_id, (select auth.uid())))
+  );
+
+revoke update on public.community_messages from authenticated;
+grant update (read_at) on public.community_messages to authenticated;
+
+
+-- Доступ к функциям — только вошедшим
+do $$
+declare
+  f text;
+begin
+  foreach f in array array[
+    'join_community(bigint)', 'leave_community(bigint)', 'invite_to_community(bigint, uuid)',
+    'answer_community_request(bigint, uuid, boolean)', 'set_community_role(bigint, uuid, text)',
+    'remove_from_community(bigint, uuid)', 'approve_suggested_post(bigint)'
+  ] loop
+    execute format('revoke execute on function public.%s from public, anon', f);
+    execute format('grant execute on function public.%s to authenticated', f);
+  end loop;
+end $$;
+
+-- Realtime: новые сообщения сообществу и изменения состава приходят сразу
+do $$
+begin
+  alter publication supabase_realtime add table public.community_messages;
+exception when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.community_members;
+exception when duplicate_object then null;
+end $$;
+
+-- =========================================================
+-- Фотоальбомы, как в VK.
+-- Фото без альбома — системный альбом «Фотографии с моей страницы».
+-- Приватность альбома: all — все, friends — только друзья, me — только я
+-- =========================================================
+create table if not exists public.photo_albums (
+  id bigint generated always as identity primary key,
+  owner_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  title text not null check (char_length(btrim(title)) between 1 and 64),
+  description text not null default '' check (char_length(description) <= 1000),
+  privacy text not null default 'all' check (privacy in ('all', 'friends', 'me')),
+  cover_photo_id bigint, -- ссылка на фото — ниже, когда у photos появится album_id
+  created_at timestamptz not null default now()
+);
+
+create index if not exists photo_albums_owner_idx on public.photo_albums (owner_id, created_at desc);
+
+alter table public.photos add column if not exists album_id bigint references public.photo_albums (id) on delete cascade;
+create index if not exists photos_album_idx on public.photos (album_id, created_at desc);
+
+do $$
+begin
+  alter table public.photo_albums
+    add constraint photo_albums_cover_photo_id_fkey foreign key (cover_photo_id) references public.photos (id) on delete set null;
+exception when duplicate_object then null;
+end $$;
+
+-- Видно ли альбом этому человеку
+create or replace function public.can_view_album(a bigint, uid uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (
+    select 1 from public.photo_albums al
+    where al.id = a
+      and (
+        al.owner_id = uid
+        or al.privacy = 'all'
+        or (al.privacy = 'friends' and public.are_friends(al.owner_id, uid))
+      )
+  );
+$$;
+
+-- Альбом принадлежит этому человеку (фото кладут только в свои альбомы)
+create or replace function public.owns_album(a bigint, uid uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (select 1 from public.photo_albums where id = a and owner_id = uid);
+$$;
+
+alter table public.photo_albums enable row level security;
+
+drop policy if exists "Альбом виден по приватности" on public.photo_albums;
+create policy "Альбом виден по приватности" on public.photo_albums
+  for select to authenticated
+  -- проверка прямо по строке: функция не увидела бы только что созданный альбом (insert … returning)
+  using (
+    owner_id = (select auth.uid())
+    or privacy = 'all'
+    or (privacy = 'friends' and public.are_friends(owner_id, (select auth.uid())))
+  );
+
+drop policy if exists "Создаёт альбом владелец" on public.photo_albums;
+create policy "Создаёт альбом владелец" on public.photo_albums
+  for insert to authenticated
+  with check (owner_id = (select auth.uid()));
+
+drop policy if exists "Меняет альбом владелец" on public.photo_albums;
+create policy "Меняет альбом владелец" on public.photo_albums
+  for update to authenticated
+  using (owner_id = (select auth.uid()))
+  with check (
+    owner_id = (select auth.uid())
+    -- обложка — только фото из этого же альбома
+    and (cover_photo_id is null or exists (select 1 from public.photos p where p.id = cover_photo_id and p.album_id = photo_albums.id))
+  );
+
+drop policy if exists "Удаляет альбом владелец" on public.photo_albums;
+create policy "Удаляет альбом владелец" on public.photo_albums
+  for delete to authenticated
+  using (owner_id = (select auth.uid()));
+
+revoke update on public.photo_albums from authenticated;
+grant update (title, description, privacy, cover_photo_id) on public.photo_albums to authenticated;
+
+-- Фото: видимость учитывает и сообщество, и приватность альбома
+drop policy if exists "Фото видны, если видно сообщество" on public.photos;
+drop policy if exists "Фото видны, если видны сообщество и альбом" on public.photos;
+create policy "Фото видны, если видны сообщество и альбом" on public.photos
+  for select to authenticated
+  using (
+    (community_id is null or public.can_view_community(community_id, (select auth.uid())))
+    and (album_id is null or public.can_view_album(album_id, (select auth.uid())))
+  );
+
+drop policy if exists "Добавляет фото владелец" on public.photos;
+create policy "Добавляет фото владелец" on public.photos
+  for insert to authenticated
+  with check (
+    owner_id = (select auth.uid())
+    and (community_id is null or public.can_publish_in_community(community_id, (select auth.uid())))
+    and (album_id is null or (community_id is null and public.owns_album(album_id, (select auth.uid()))))
+  );
+
+-- Перенос фото между своими альбомами
+drop policy if exists "Переносит фото владелец" on public.photos;
+create policy "Переносит фото владелец" on public.photos
+  for update to authenticated
+  using (owner_id = (select auth.uid()) and community_id is null)
+  with check (
+    owner_id = (select auth.uid())
+    and community_id is null
+    and (album_id is null or public.owns_album(album_id, (select auth.uid())))
+  );
+
+revoke update on public.photos from authenticated;
+grant update (album_id) on public.photos to authenticated;
+
+revoke execute on function public.can_view_album(bigint, uuid) from public, anon;
+revoke execute on function public.owns_album(bigint, uuid) from public, anon;
+grant execute on function public.can_view_album(bigint, uuid) to authenticated;
+grant execute on function public.owns_album(bigint, uuid) to authenticated;
+
+-- =========================================================
+-- Музыка, как в VK.
+-- audios — загруженные треки (общие для всех), user_audios — «Моя музыка»
+-- (свои и добавленные к себе чужие), playlists + playlist_tracks — плейлисты
+-- =========================================================
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'music', 'music', true, 52428800,
+  array['audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/ogg', 'audio/wav', 'audio/x-wav', 'audio/webm', 'audio/flac', 'audio/x-flac']
+)
+on conflict (id) do nothing;
+
+drop policy if exists "Музыка: загрузка в свою папку" on storage.objects;
+create policy "Музыка: загрузка в свою папку" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'music' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+drop policy if exists "Музыка: удаление своих файлов" on storage.objects;
+create policy "Музыка: удаление своих файлов" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'music' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+create table if not exists public.audios (
+  id bigint generated always as identity primary key,
+  uploader_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  artist text not null default '' check (char_length(artist) <= 100),
+  title text not null check (char_length(btrim(title)) between 1 and 150),
+  duration integer not null default 0 check (duration between 0 and 36000), -- секунды
+  path text not null,  -- путь в бакете music
+  url text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists audios_created_idx on public.audios (created_at desc);
+create index if not exists audios_uploader_idx on public.audios (uploader_id);
+
+create table if not exists public.user_audios (
+  user_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  audio_id bigint not null references public.audios (id) on delete cascade,
+  added_at timestamptz not null default now(),
+  primary key (user_id, audio_id)
+);
+
+create index if not exists user_audios_user_idx on public.user_audios (user_id, added_at desc);
+
+create table if not exists public.playlists (
+  id bigint generated always as identity primary key,
+  owner_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  title text not null check (char_length(btrim(title)) between 1 and 100),
+  description text not null default '' check (char_length(description) <= 1000),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists playlists_owner_idx on public.playlists (owner_id, updated_at desc);
+
+create table if not exists public.playlist_tracks (
+  playlist_id bigint not null references public.playlists (id) on delete cascade,
+  audio_id bigint not null references public.audios (id) on delete cascade,
+  added_at timestamptz not null default now(),
+  primary key (playlist_id, audio_id)
+);
+
+create index if not exists playlist_tracks_playlist_idx on public.playlist_tracks (playlist_id, added_at);
+
+alter table public.audios enable row level security;
+alter table public.user_audios enable row level security;
+alter table public.playlists enable row level security;
+alter table public.playlist_tracks enable row level security;
+
+-- Треки, «Моя музыка» и плейлисты видят все вошедшие (как открытая музыка в VK)
+drop policy if exists "Треки видны всем" on public.audios;
+create policy "Треки видны всем" on public.audios for select to authenticated using (true);
+
+drop policy if exists "Загружает трек сам пользователь" on public.audios;
+create policy "Загружает трек сам пользователь" on public.audios
+  for insert to authenticated
+  with check (
+    uploader_id = (select auth.uid())
+    and path like (select auth.uid())::text || '/%'
+  );
+
+drop policy if exists "Меняет трек загрузивший" on public.audios;
+create policy "Меняет трек загрузивший" on public.audios
+  for update to authenticated
+  using (uploader_id = (select auth.uid()))
+  with check (uploader_id = (select auth.uid()));
+
+drop policy if exists "Удаляет трек загрузивший" on public.audios;
+create policy "Удаляет трек загрузивший" on public.audios
+  for delete to authenticated
+  using (uploader_id = (select auth.uid()));
+
+revoke update on public.audios from authenticated;
+grant update (artist, title) on public.audios to authenticated;
+
+drop policy if exists "Моя музыка видна всем" on public.user_audios;
+create policy "Моя музыка видна всем" on public.user_audios for select to authenticated using (true);
+
+drop policy if exists "Добавляет к себе сам" on public.user_audios;
+create policy "Добавляет к себе сам" on public.user_audios
+  for insert to authenticated
+  with check (user_id = (select auth.uid()));
+
+drop policy if exists "Убирает у себя сам" on public.user_audios;
+create policy "Убирает у себя сам" on public.user_audios
+  for delete to authenticated
+  using (user_id = (select auth.uid()));
+
+revoke update on public.user_audios from authenticated;
+
+drop policy if exists "Плейлисты видны всем" on public.playlists;
+create policy "Плейлисты видны всем" on public.playlists for select to authenticated using (true);
+
+drop policy if exists "Создаёт плейлист владелец" on public.playlists;
+create policy "Создаёт плейлист владелец" on public.playlists
+  for insert to authenticated
+  with check (owner_id = (select auth.uid()));
+
+drop policy if exists "Меняет плейлист владелец" on public.playlists;
+create policy "Меняет плейлист владелец" on public.playlists
+  for update to authenticated
+  using (owner_id = (select auth.uid()))
+  with check (owner_id = (select auth.uid()));
+
+drop policy if exists "Удаляет плейлист владелец" on public.playlists;
+create policy "Удаляет плейлист владелец" on public.playlists
+  for delete to authenticated
+  using (owner_id = (select auth.uid()));
+
+revoke update on public.playlists from authenticated;
+grant update (title, description, updated_at) on public.playlists to authenticated;
+
+drop policy if exists "Треки плейлиста видны всем" on public.playlist_tracks;
+create policy "Треки плейлиста видны всем" on public.playlist_tracks for select to authenticated using (true);
+
+drop policy if exists "Добавляет в плейлист владелец" on public.playlist_tracks;
+create policy "Добавляет в плейлист владелец" on public.playlist_tracks
+  for insert to authenticated
+  with check (exists (select 1 from public.playlists p where p.id = playlist_id and p.owner_id = (select auth.uid())));
+
+drop policy if exists "Убирает из плейлиста владелец" on public.playlist_tracks;
+create policy "Убирает из плейлиста владелец" on public.playlist_tracks
+  for delete to authenticated
+  using (exists (select 1 from public.playlists p where p.id = playlist_id and p.owner_id = (select auth.uid())));
+
+revoke update on public.playlist_tracks from authenticated;
+
+
+-- =========================================================
+-- Видео, как в VK.
+-- videos — загруженные ролики (файл и превью в бакете videos), user_videos — «Мои видео»
+-- (свои и добавленные к себе), лайки, комментарии и просмотры (уникальные зрители)
+-- =========================================================
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'videos', 'videos', true, 52428800,
+  array['video/mp4', 'video/webm', 'video/quicktime', 'video/x-m4v', 'video/ogg', 'image/jpeg']
+)
+on conflict (id) do nothing;
+
+drop policy if exists "Видео: загрузка в свою папку" on storage.objects;
+create policy "Видео: загрузка в свою папку" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'videos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+drop policy if exists "Видео: удаление своих файлов" on storage.objects;
+create policy "Видео: удаление своих файлов" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'videos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+create table if not exists public.videos (
+  id bigint generated always as identity primary key,
+  owner_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  title text not null check (char_length(btrim(title)) between 1 and 150),
+  description text not null default '' check (char_length(description) <= 5000),
+  duration integer not null default 0 check (duration between 0 and 86400), -- секунды
+  width integer,
+  height integer,
+  path text not null,
+  url text not null,
+  poster_path text,
+  poster_url text,
+  views integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists videos_created_idx on public.videos (created_at desc);
+create index if not exists videos_owner_idx on public.videos (owner_id, created_at desc);
+
+create table if not exists public.user_videos (
+  user_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  video_id bigint not null references public.videos (id) on delete cascade,
+  added_at timestamptz not null default now(),
+  primary key (user_id, video_id)
+);
+
+create index if not exists user_videos_user_idx on public.user_videos (user_id, added_at desc);
+
+create table if not exists public.video_likes (
+  video_id bigint not null references public.videos (id) on delete cascade,
+  user_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (video_id, user_id)
+);
+
+create table if not exists public.video_comments (
+  id bigint generated always as identity primary key,
+  video_id bigint not null references public.videos (id) on delete cascade,
+  author_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  text text not null check (char_length(text) between 1 and 2000),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists video_comments_video_idx on public.video_comments (video_id, created_at);
+
+create table if not exists public.video_views (
+  video_id bigint not null references public.videos (id) on delete cascade,
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  primary key (video_id, user_id)
+);
+
+alter table public.videos enable row level security;
+alter table public.user_videos enable row level security;
+alter table public.video_likes enable row level security;
+alter table public.video_comments enable row level security;
+alter table public.video_views enable row level security; -- напрямую недоступна, только через view_video
+
+drop policy if exists "Видео видны всем" on public.videos;
+create policy "Видео видны всем" on public.videos for select to authenticated using (true);
+
+drop policy if exists "Загружает видео владелец" on public.videos;
+create policy "Загружает видео владелец" on public.videos
+  for insert to authenticated
+  with check (
+    owner_id = (select auth.uid())
+    and path like (select auth.uid())::text || '/%'
+    and (poster_path is null or poster_path like (select auth.uid())::text || '/%')
+    and views = 0
+  );
+
+drop policy if exists "Меняет видео владелец" on public.videos;
+create policy "Меняет видео владелец" on public.videos
+  for update to authenticated
+  using (owner_id = (select auth.uid()))
+  with check (owner_id = (select auth.uid()));
+
+drop policy if exists "Удаляет видео владелец" on public.videos;
+create policy "Удаляет видео владелец" on public.videos
+  for delete to authenticated
+  using (owner_id = (select auth.uid()));
+
+revoke update on public.videos from authenticated;
+grant update (title, description) on public.videos to authenticated;
+
+drop policy if exists "Мои видео видны всем" on public.user_videos;
+create policy "Мои видео видны всем" on public.user_videos for select to authenticated using (true);
+
+drop policy if exists "Добавляет видео к себе сам" on public.user_videos;
+create policy "Добавляет видео к себе сам" on public.user_videos
+  for insert to authenticated with check (user_id = (select auth.uid()));
+
+drop policy if exists "Убирает видео у себя сам" on public.user_videos;
+create policy "Убирает видео у себя сам" on public.user_videos
+  for delete to authenticated using (user_id = (select auth.uid()));
+
+revoke update on public.user_videos from authenticated;
+
+drop policy if exists "Лайки видео видны всем" on public.video_likes;
+create policy "Лайки видео видны всем" on public.video_likes for select to authenticated using (true);
+
+drop policy if exists "Лайк видео ставит сам" on public.video_likes;
+create policy "Лайк видео ставит сам" on public.video_likes
+  for insert to authenticated with check (user_id = (select auth.uid()));
+
+drop policy if exists "Лайк видео снимает сам" on public.video_likes;
+create policy "Лайк видео снимает сам" on public.video_likes
+  for delete to authenticated using (user_id = (select auth.uid()));
+
+revoke update on public.video_likes from authenticated;
+
+drop policy if exists "Комментарии к видео видны всем" on public.video_comments;
+create policy "Комментарии к видео видны всем" on public.video_comments for select to authenticated using (true);
+
+drop policy if exists "Комментирует видео сам" on public.video_comments;
+create policy "Комментирует видео сам" on public.video_comments
+  for insert to authenticated with check (author_id = (select auth.uid()));
+
+drop policy if exists "Удаляет автор или владелец видео" on public.video_comments;
+create policy "Удаляет автор или владелец видео" on public.video_comments
+  for delete to authenticated
+  using (
+    author_id = (select auth.uid())
+    or exists (select 1 from public.videos v where v.id = video_id and v.owner_id = (select auth.uid()))
+  );
+
+revoke update on public.video_comments from authenticated;
+
+-- Просмотр: каждый зритель считается один раз. Возвращает число просмотров
+create or replace function public.view_video(v bigint)
+returns integer
+language plpgsql security definer set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+  total integer;
+begin
+  if uid is null then raise exception 'Нужно войти'; end if;
+  insert into public.video_views (video_id, user_id) values (v, uid) on conflict do nothing;
+  if found then
+    update public.videos set views = views + 1 where id = v returning views into total;
+  else
+    select views into total from public.videos where id = v;
+  end if;
+  return coalesce(total, 0);
+end;
+$$;
+
+revoke execute on function public.view_video(bigint) from public, anon;
+grant execute on function public.view_video(bigint) to authenticated;

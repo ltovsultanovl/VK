@@ -11,6 +11,8 @@ import Communities from "./pages/Communities";
 import Photos from "./pages/Photos";
 import Music from "./pages/Music";
 import Video from "./pages/Video";
+import Notifications from "./pages/Notifications";
+import MobileNav from "./components/MobileNav";
 import Community from "./pages/Community";
 import CommunityManage from "./pages/CommunityManage";
 import EditProfile from "./pages/EditProfile";
@@ -28,6 +30,7 @@ import { ChatProvider, useChat } from "./context/ChatContext";
 import { PlayerProvider } from "./context/PlayerContext";
 import { MusicProvider } from "./context/MusicContext";
 import { VideoProvider } from "./context/VideoContext";
+import { NotificationsProvider } from "./context/NotificationsContext";
 import { supabaseConfigured } from "./lib/supabase";
 import { useStoredState } from "./hooks";
 
@@ -39,7 +42,7 @@ const readTheme = (): Theme => (document.documentElement.dataset.theme === "dark
 // #communities[/manage|/search], #club/<id>[/manage[/раздел]],
 // #photos[/<id>][/album/<id>] — фотографии и альбомы,
 // #music[/playlists|/search?q=|/playlist/<id>|/user/<id>] — музыка,
-// #video[/search?q=|/user/<id>|/<id>] — видео
+// #video[/search?q=|/user/<id>|/<id>] — видео, #notifications — уведомления
 const VIEWS = [
   "feed",
   "profile",
@@ -52,6 +55,7 @@ const VIEWS = [
   "photos",
   "music",
   "video",
+  "notifications",
 ];
 const readRoute = () => {
   const [path, search = ""] = decodeURIComponent(
@@ -163,6 +167,7 @@ function Shell({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => vo
                 onNavigate={navigate}
               />
             )}
+            {view === "notifications" && <Notifications onNavigate={navigate} />}
             {view === "video" && (
               <Video
                 section={param}
@@ -194,6 +199,15 @@ function Shell({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => vo
           </ErrorBoundary>
         </main>
       </div>
+      <MobileNav
+        view={profileId === myId ? "profile" : view}
+        onNavigate={navigate}
+        counters={{
+          messages: chat.unreadTotal,
+          friends: incoming.length,
+          communities: invitations.length,
+        }}
+      />
     </>
   );
 }
@@ -220,12 +234,14 @@ export default function App() {
             <PlayerProvider>
               <MusicProvider>
                 <VideoProvider>
-                  <Shell
-                    theme={theme}
-                    onToggleTheme={() =>
-                      setTheme((t) => (t === "dark" ? "light" : "dark"))
-                    }
-                  />
+                  <NotificationsProvider>
+                    <Shell
+                      theme={theme}
+                      onToggleTheme={() =>
+                        setTheme((t) => (t === "dark" ? "light" : "dark"))
+                      }
+                    />
+                  </NotificationsProvider>
                 </VideoProvider>
               </MusicProvider>
             </PlayerProvider>

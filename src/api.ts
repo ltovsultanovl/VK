@@ -7,6 +7,7 @@ import { readImage } from "./utils";
 import type {
   Album,
   AlbumPrivacy,
+  AppNotification,
   AttachmentType,
   Comment,
   Community,
@@ -21,6 +22,7 @@ import type {
   MemberStatus,
   Membership,
   MyCommunity,
+  NotificationType,
   Person,
   Photo,
   Playlist,
@@ -258,6 +260,7 @@ function toPerson(row: PersonRow | null | undefined): Person | null {
     color: row.color,
     avatar: row.avatar_url,
     city: row.info?.contacts?.city ?? "",
+    gender: row.info?.gender,
   };
 }
 
@@ -1298,3 +1301,75 @@ export const deleteVideoComment = async (commentId: number) =>
 
 // Засчитать просмотр (каждый зритель — один раз) → новое число просмотров
 export const viewVideo = async (videoId: number) => unwrap<number>(await supabase.rpc("view_video", { v: videoId }));
+
+// ---------- Уведомления ----------
+
+const NOTIFICATION_FIELDS = `id, type, text, created_at, read_at,
+  actor:profiles!notifications_actor_id_fkey(${PERSON_FIELDS}),
+  post:posts(id, text, image_url, owner_id, community_id),
+  photo:photos(id, url, owner_id),
+  video:videos(id, title, poster_url),
+  community:communities(${COMMUNITY_BRIEF})`;
+
+interface NotificationRow {
+  id: number;
+  type: NotificationType;
+  text: string;
+  created_at: string;
+  read_at: string | null;
+  actor: PersonRow | null;
+  post: { id: number; text: string; image_url: string | null; owner_id: string | null; community_id: number | null } | null;
+  photo: { id: number; url: string; owner_id: string } | null;
+  video: { id: number; title: string; poster_url: string | null } | null;
+  community: CommunityBriefRow | null;
+}
+
+const toNotification = (row: NotificationRow): AppNotification => ({
+  id: row.id,
+  type: row.type,
+  text: row.text ?? "",
+  createdAt: row.created_at,
+  readAt: row.read_at,
+  actor: toPerson(row.actor),
+  post: row.post && {
+    id: row.post.id,
+    text: row.post.text,
+    image: row.post.image_url,
+    ownerId: row.post.owner_id,
+    communityId: row.post.community_id,
+  },
+  photo: row.photo && { id: row.photo.id, src: row.photo.url, ownerId: row.photo.owner_id },
+  video: row.video && { id: row.video.id, title: row.video.title, poster: row.video.poster_url },
+  community: toCommunityBrief(row.community),
+});
+
+const NOTIFICATIONS_LIMIT = 100;
+
+export const fetchNotifications = async () =>
+  unwrap<NotificationRow[]>(
+    await supabase
+      .from("notifications")
+      .select(NOTIFICATION_FIELDS)
+      .order("created_at", { ascending: false })
+      .limit(NOTIFICATIONS_LIMIT),
+  ).map(toNotification);
+
+export const fetchNotification = async (id: number) => {
+  const row = unwrap<NotificationRow | null>(
+    await supabase.from("notifications").select(NOTIFICATION_FIELDS).eq("id", id).maybeSingle(),
+  );
+  return row && toNotification(row);
+};
+
+// Отметить прочитанными все мои непрочитанные
+export const markNotificationsRead = async (myId: string) =>
+  unwrap(
+    await supabase
+      .from("notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("user_id", myId)
+      .is("read_at", null),
+  );
+
+export const deleteNotification = async (id: number) =>
+  unwrap(await supabase.from("notifications").delete().eq("id", id));

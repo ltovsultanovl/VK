@@ -2,6 +2,10 @@
    Токены (по мотивам VKUI)
    ========================================================= */
 :root {
+  /* Ширина страницы: шапка и контент выровнены по ней */
+  --page-width: 1100px;
+  --side-width: 250px;
+  --profile-side-width: 300px;
   --bg: #edeef0;
   --card: #ffffff;
   --text: #000000;
@@ -33,6 +37,12 @@
   --avatar-empty-fg: #ffffff;
 
   --header-h: 48px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --header-total: calc(var(--header-h) + var(--safe-top));
+  --nav-h: 56px;
   --radius: 12px;
 }
 
@@ -216,6 +226,7 @@ textarea {
   background: var(--hover);
 }
 .btn--icon {
+  flex-shrink: 0;
   width: 32px;
   padding: 0;
 }
@@ -260,12 +271,13 @@ textarea {
   position: sticky;
   top: 0;
   z-index: 50;
-  height: var(--header-h);
+  height: var(--header-total);
+  padding-top: var(--safe-top);
   background: var(--header);
   box-shadow: 0 1px 0 var(--separator);
 }
 .header__inner {
-  max-width: 1002px;
+  max-width: var(--page-width);
   height: 100%;
   margin: 0 auto;
   padding: 0 16px;
@@ -430,7 +442,7 @@ textarea {
    Сетка страницы: 150 | 550 | 230
    ========================================================= */
 .layout {
-  max-width: 1002px;
+  max-width: var(--page-width);
   margin: 0 auto;
   padding: 16px 16px 40px;
   display: grid;
@@ -443,13 +455,13 @@ textarea {
 
 .columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 230px;
+  grid-template-columns: minmax(0, 1fr) var(--side-width);
   gap: 16px;
   align-items: start;
 }
 .columns__side {
   position: sticky;
-  top: calc(var(--header-h) + 16px);
+  top: calc(var(--header-total) + 16px);
 }
 
 /* =========================================================
@@ -457,7 +469,7 @@ textarea {
    ========================================================= */
 .sidebar {
   position: sticky;
-  top: calc(var(--header-h) + 16px);
+  top: calc(var(--header-total) + 16px);
   align-self: start;
 }
 .nav-item {
@@ -1131,7 +1143,7 @@ textarea {
 .messenger {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
-  height: calc(100vh - var(--header-h) - 32px);
+  height: calc(100dvh - var(--header-total) - 32px);
   min-height: 480px;
   overflow: hidden;
 }
@@ -1727,6 +1739,8 @@ textarea {
   inset: 0;
   z-index: 100;
   display: grid;
+  /* Колонка по ширине экрана: окно с заданной шириной не может её растянуть */
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   padding: 16px;
   background: rgba(0, 0, 0, 0.5);
@@ -1954,7 +1968,7 @@ textarea {
    Профиль: медиа, «Создать пост», промо, друзья
    ========================================================= */
 .columns--profile {
-  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-columns: minmax(0, 1fr) var(--profile-side-width);
 }
 
 .media {
@@ -2424,9 +2438,6 @@ textarea {
   .columns {
     grid-template-columns: minmax(0, 1fr);
   }
-  .columns__side {
-    display: none;
-  }
 }
 @media (max-width: 760px) {
   .layout {
@@ -2440,21 +2451,14 @@ textarea {
     width: auto;
     margin-right: 12px;
   }
-  .logo__text,
-  .player {
+  .logo__text {
     display: none;
   }
   .search {
     width: auto;
     flex: 1;
   }
-  .messenger {
-    grid-template-columns: 1fr;
-    height: calc(100vh - var(--header-h) - 16px);
-  }
-  .im-list {
-    display: none;
-  }
+
   .profile-info {
     flex-direction: column;
     align-items: center;
@@ -5028,5 +5032,688 @@ button.shared--state {
   }
   .profile-videos .video-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* =========================================================
+   Уведомления
+   ========================================================= */
+.notif-bell {
+  position: relative;
+  margin-right: 8px;
+}
+.notif-bell .icon-btn {
+  width: 40px;
+  height: 40px;
+}
+.icon-btn--active {
+  background: var(--hover);
+  color: var(--text-subhead);
+}
+.notif-panel {
+  top: calc(100% + 10px);
+  right: -8px;
+  left: auto;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  width: 420px;
+  max-height: min(600px, calc(100vh - 80px));
+  padding: 0;
+  overflow: hidden;
+}
+.notif-panel__head {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--separator);
+  font-size: 15px;
+  font-weight: 600;
+}
+.notif-panel__list {
+  flex: 1;
+  overflow-y: auto;
+}
+.notif-panel__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 36px 24px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-align: center;
+}
+.notif-panel__all {
+  padding: 12px;
+  border: 0;
+  border-top: 1px solid var(--separator);
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.notif-panel__all:hover {
+  background: var(--hover);
+}
+
+.notif {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.notif:hover {
+  background: var(--hover);
+}
+.notif--unread {
+  background: var(--accent-alpha);
+}
+.notif--unread:hover {
+  background: var(--accent-alpha);
+  filter: brightness(1.05);
+}
+.notif__face {
+  position: relative;
+  flex-shrink: 0;
+}
+.notif__badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--card);
+  border-radius: 50%;
+  color: #fff;
+}
+.notif__badge svg {
+  stroke-width: 2.4;
+}
+.notif__badge--like {
+  background: var(--like);
+}
+.notif__badge--like svg {
+  fill: currentColor;
+}
+.notif__badge--comment {
+  background: var(--accent);
+}
+.notif__badge--friend {
+  background: #4bb34b;
+}
+.notif__badge--community {
+  background: #a06ee6;
+}
+.notif__body {
+  flex: 1;
+  min-width: 0;
+}
+.notif__text {
+  font-size: 14px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+.notif__name {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+.notif__name:hover {
+  text-decoration: underline;
+}
+.notif__quote {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 19px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.notif__time {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.notif__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.notif__actions .btn {
+  height: 30px;
+  font-size: 13px;
+}
+.notif__done {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.notif__preview {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: var(--field-bg) center / cover no-repeat;
+}
+.notif__hide {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+}
+.notif:hover .notif__hide,
+.notif__hide:focus-visible {
+  opacity: 1;
+}
+.notif-page {
+  padding-bottom: 8px;
+}
+.notif-page .notif {
+  padding-right: 44px;
+}
+@media (hover: none) {
+  .notif__hide {
+    opacity: 1;
+  }
+}
+@media (max-width: 760px) {
+  .notif-panel {
+    position: fixed;
+    top: 56px;
+    left: 8px;
+    right: 8px;
+    width: auto;
+  }
+}
+
+/* =========================================================
+   Адаптив: планшет — меню иконками, разделы вкладками сверху;
+   телефон — нижняя панель, список чатов ↔ чат
+   ========================================================= */
+.mobile-nav,
+.chat__back {
+  display: none;
+}
+
+@media (max-width: 1100px) {
+  :root {
+    --side-width: 220px;
+    --profile-side-width: 260px;
+  }
+}
+
+@media (max-width: 960px) {
+  /* Правая колонка уходит под содержимое, а меню раздела — вкладками над ним */
+  .columns__side {
+    position: static;
+  }
+  .columns__side:has(> .side-menu:only-child) {
+    order: -1;
+  }
+  /* Если у карточки свои вкладки (Друзья, Сообщества, Музыка, Видео) — меню раздела дублирует их */
+  .columns:has(> :first-child .wall-tabs) > .columns__side:has(> .side-menu:only-child) {
+    display: none;
+  }
+  .wall-head .wall-tabs,
+  .card > .wall-tabs {
+    min-width: 0;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .wall-head .wall-tabs {
+    flex: 1;
+  }
+  .wall-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .wall-tabs .seg {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .communities-head__create {
+    flex-shrink: 0;
+  }
+  .side-menu {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .side-menu::-webkit-scrollbar {
+    display: none;
+  }
+  .side-menu__item {
+    flex-shrink: 0;
+    width: auto;
+    white-space: nowrap;
+  }
+  .side-menu__item .counter {
+    margin-left: 6px;
+  }
+  .side-menu .separator {
+    display: none;
+  }
+
+  /* Левое меню — только иконки */
+  .layout {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+  .logo {
+    width: auto;
+    margin-right: 16px;
+  }
+  .nav-item {
+    position: relative;
+    justify-content: center;
+    height: 40px;
+    padding: 0;
+  }
+  .nav-item__label,
+  .sidebar__footer {
+    display: none;
+  }
+  .nav-item .counter {
+    position: absolute;
+    top: 1px;
+    right: 0;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    font-size: 10px;
+    line-height: 16px;
+  }
+  .columns--profile {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* Шапка профиля и сообщества: кнопки уходят на новую строку, если не помещаются рядом с именем */
+  .profile-info {
+    flex-wrap: wrap;
+  }
+  .profile-info__meta {
+    min-width: 200px;
+  }
+  /* Кнопки («Редактировать профиль» и значок «Поделиться» рядом) — слева */
+  .profile-info__actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}
+@media (max-width: 760px) {
+  /* На телефоне шапка по центру — и кнопки тоже */
+  .profile-info__actions {
+    position: relative;
+    left: 12px; /* чуть правее центра */
+    align-self: center;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 760px) {
+  /* Левое меню скрыто — весь экран под содержимое */
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    padding-bottom: calc(var(--nav-h) + 16px + var(--safe-bottom));
+  }
+
+  /* Компактная шапка */
+  .header__inner {
+    gap: 4px;
+    padding: 0 8px;
+  }
+  .logo {
+    margin-right: 6px;
+  }
+  .header__actions {
+    gap: 0;
+    margin-left: 4px;
+  }
+  .header__actions .icon-btn {
+    width: 38px;
+    height: 38px;
+  }
+  .header__spacer {
+    flex: 0;
+  }
+  .search {
+    min-width: 0;
+  }
+
+  /* Нижняя панель разделов */
+  .mobile-nav {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 55;
+    display: flex;
+    height: calc(var(--nav-h) + var(--safe-bottom));
+    padding: 0 var(--safe-right) var(--safe-bottom) var(--safe-left);
+    background: var(--header);
+    box-shadow: 0 -1px 0 var(--separator);
+  }
+  .mobile-nav__item {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 0;
+    border: 0;
+    background: none;
+    color: var(--icon-secondary);
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+  }
+  .mobile-nav__item.active {
+    color: var(--accent);
+  }
+  .mobile-nav__icon {
+    position: relative;
+    display: grid;
+    place-items: center;
+    height: 28px;
+  }
+  .mobile-nav__icon .badge {
+    top: -3px;
+    right: -10px;
+  }
+  .mobile-nav__item.active .avatar {
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+
+  /* Мессенджер: сначала список чатов, по тапу — чат с кнопкой «назад» */
+  .messenger {
+    grid-template-columns: minmax(0, 1fr);
+    height: calc(100dvh - var(--header-total) - var(--nav-h) - 16px - var(--safe-bottom));
+    min-height: 0;
+  }
+  .messenger .chat {
+    display: none;
+  }
+  .messenger--chat .chat {
+    display: flex;
+  }
+  .messenger--chat .im-list {
+    display: none;
+  }
+  .im-list {
+    border-right: 0;
+  }
+  .chat__back {
+    display: grid;
+    margin-left: -8px;
+  }
+
+  .modal-overlay {
+    padding: 8px;
+  }
+  .modal {
+    max-width: 100%;
+    max-height: calc(100dvh - 16px);
+  }
+  .columns__side .card,
+  .columns__side .side-menu {
+    margin-bottom: 0;
+  }
+}
+
+/* Шторка «Ещё» (телефон) */
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.45);
+  animation: fade-in 0.15s ease;
+}
+.sheet {
+  width: 100%;
+  max-height: 80vh;
+  padding: 8px 8px calc(12px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  border-radius: 16px 16px 0 0;
+  background: var(--card);
+  animation: sheet-up 0.2s ease;
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(40px);
+    opacity: 0.6;
+  }
+}
+.sheet__grip {
+  width: 36px;
+  height: 4px;
+  margin: 4px auto 10px;
+  border-radius: 2px;
+  background: var(--separator);
+}
+.sheet__group + .sheet__group {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--separator);
+}
+.sheet__item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+.sheet__item svg {
+  color: var(--accent);
+}
+.sheet__item.active {
+  background: var(--active);
+}
+.sheet__item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sheet__item .counter {
+  margin-left: auto;
+}
+
+/* =========================================================
+   Все телефоны: вырез и «полоска» iPhone, автозум при вводе,
+   самые узкие экраны (Fold, SE) и горизонтальная ориентация
+   ========================================================= */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+body {
+  -webkit-tap-highlight-color: transparent;
+}
+.header__search-btn {
+  display: none;
+}
+/* Поля ввода сжимаются вместе с контейнером, а не распирают окно своей «естественной» шириной */
+input,
+select,
+textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+.modal__head,
+.modal__body,
+.modal__footer {
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  /* В горизонтальной ориентации у iPhone вырез сбоку — не прячем под него содержимое */
+  .header__inner {
+    padding-right: max(8px, var(--safe-right));
+    padding-left: max(8px, var(--safe-left));
+  }
+  .layout {
+    padding-right: max(8px, var(--safe-right));
+    padding-left: max(8px, var(--safe-left));
+  }
+  /* iOS увеличивает страницу при вводе в поле со шрифтом меньше 16 px */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+  .notif-panel,
+  .header-player__dropdown {
+    top: calc(var(--header-total) + 8px);
+  }
+  .notif-panel {
+    max-height: calc(100dvh - var(--header-total) - var(--nav-h) - 24px - var(--safe-bottom));
+  }
+}
+
+/* Узкие телефоны: вместо поля поиска — значок, плеер в три строки */
+@media (max-width: 480px) {
+  .header .search {
+    display: none;
+  }
+  .header__search-btn {
+    display: grid;
+  }
+  .header__spacer {
+    flex: 1;
+  }
+
+  .player:not(.player--empty) {
+    gap: 8px 10px;
+  }
+  .player .track-cover {
+    order: 1;
+  }
+  .player__main {
+    order: 2;
+    flex: 1 1 0;
+  }
+  .player__controls {
+    order: 3;
+  }
+  .player__extra {
+    order: 4;
+    margin-left: auto;
+  }
+  .player__progress {
+    order: 5;
+  }
+}
+
+/* Узкие телефоны: кнопки в строке человека / сообщества уходят под имя, поле комментария сжимается */
+@media (max-width: 480px) {
+  .friend {
+    flex-wrap: wrap;
+    gap: 10px 12px;
+  }
+  .friend .avatar {
+    width: 56px !important;
+    height: 56px !important;
+  }
+  .friend__info {
+    flex: 1 1 140px;
+  }
+  .friend__button,
+  .friend > .friend-actions,
+  .friend > .friend-menu {
+    flex-basis: 100%;
+    flex-shrink: 1;
+    margin-left: 68px;
+  }
+  .friend__button .btn,
+  .friend > .friend-actions .btn {
+    flex: 1 1 auto;
+  }
+  .comment-form__field,
+  .comment-form__field input {
+    min-width: 0;
+  }
+}
+
+/* Самые узкие (Galaxy Fold, iPhone SE первого поколения) */
+@media (max-width: 360px) {
+  .layout {
+    padding-right: max(6px, var(--safe-right));
+    padding-left: max(6px, var(--safe-left));
+  }
+  .mobile-nav__item {
+    font-size: 9px;
+  }
+  .mobile-nav__item span:last-child,
+  .mobile-nav__item {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .profile-info {
+    padding: 16px 12px;
+  }
+  .btn {
+    padding: 0 12px;
+  }
+  .post__head {
+    padding-left: 12px;
+  }
+  .post__text,
+  .post__actions {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+}
+
+/* Горизонтальная ориентация телефона: экран низкий — панель ниже, просмотр в две колонки */
+@media (max-height: 500px) and (orientation: landscape) {
+  :root {
+    --nav-h: 44px;
+  }
+  .mobile-nav__item {
+    flex-direction: row;
+    gap: 6px;
+    font-size: 11px;
+  }
+  .viewer {
+    padding: 0;
+  }
+  .viewer__box,
+  .video-viewer__box {
+    grid-template-columns: minmax(0, 1fr) min(340px, 42%);
+    grid-template-rows: none;
+    height: 100dvh;
+    border-radius: 0;
+  }
+  .viewer__side {
+    border-left: 1px solid var(--separator);
+  }
+  .video-viewer__stage {
+    aspect-ratio: auto;
+    height: 100dvh;
+    max-height: none;
+  }
+  .modal {
+    max-height: calc(100dvh - 16px);
+  }
+  .sheet {
+    max-height: 100dvh;
   }
 }

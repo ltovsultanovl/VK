@@ -17,6 +17,7 @@ import {
 import { MAX_FILE_MB, attachmentKind } from "../api";
 import {
   AttachIcon,
+  ChevronLeftIcon,
   CamcorderIcon,
   CloseIcon,
   CopyIcon,
@@ -455,6 +456,7 @@ export default function Messenger<R>({
   onRetry,
   onDelete,
   emptyText = "Здесь пока нет чатов",
+  startInChat = false,
 }: {
   dialogs: ViewDialog<R>[];
   activeId: string | undefined;
@@ -464,7 +466,11 @@ export default function Messenger<R>({
   onRetry?: (message: ViewMessage<R>) => void;
   onDelete?: (message: ViewMessage<R>, forAll: boolean) => void;
   emptyText?: string;
+  // На телефоне видно что-то одно: список чатов или открытый чат. true — сразу чат
+  // (пришли по «Написать сообщение» со страницы человека)
+  startInChat?: boolean;
 }) {
+  const [chatOpen, setChatOpen] = useState(startInChat);
   const [toDelete, setToDelete] = useState<ViewMessage<R> | null>(null); // сообщение, для которого открыто «Удалить?»
   const [text, setText] = useState("");
   const [folder, setFolder] = useState(folders[0]);
@@ -614,7 +620,7 @@ export default function Messenger<R>({
   const canSend = text.trim() || attachment;
 
   return (
-    <div className="card messenger">
+    <div className={`card messenger ${chatOpen ? "messenger--chat" : ""}`}>
       {/* ---------- Список чатов ---------- */}
       <div className="im-list">
         <div className="im-list__head">
@@ -652,7 +658,10 @@ export default function Messenger<R>({
                 key={d.id}
                 type="button"
                 className={`dialog ${d.id === active?.id ? "active" : ""}`}
-                onClick={() => onOpen(d.id)}
+                onClick={() => {
+                  onOpen(d.id);
+                  setChatOpen(true);
+                }}
               >
                 <Avatar
                   name={d.person.name}
@@ -707,6 +716,9 @@ export default function Messenger<R>({
       {active ? (
         <div className={`chat ${dragging ? "chat--drag" : ""}`} {...dropProps}>
           <div className="chat__head">
+            <button type="button" className="icon-btn chat__back" title="Назад к чатам" onClick={() => setChatOpen(false)}>
+              <ChevronLeftIcon size={24} />
+            </button>
             {/* Аватар и имя ведут на страницу собеседника, как в VK */}
             <a
               href={personHref(active.person)}

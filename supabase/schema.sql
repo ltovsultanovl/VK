@@ -1385,3 +1385,250 @@ $$;
 
 revoke execute on function public.view_video(bigint) from public, anon;
 grant execute on function public.view_video(bigint) to authenticated;
+
+-- =========================================================
+-- Уведомления, как в VK.
+-- Создаются триггерами (сайт не может их подделать): лайки и комментарии к записям,
+-- фото и видео, записи на стене, друзья, приглашения и заявки в сообщества.
+-- Убрали лайк / отменили заявку — уведомление тоже пропадает
+-- =========================================================
+create table if not exists public.notifications (
+  id bigint generated always as identity primary key,
+  user_id uuid not null references public.profiles (id) on delete cascade,   -- кому
+  actor_id uuid references public.profiles (id) on delete cascade,           -- кто сделал
+  type text not null check (type in (
+    'post_like', 'post_comment', 'wall_post', 'post_approved',
+    'photo_like', 'photo_comment', 'video_like', 'video_comment',
+    'friend_request', 'friend_accepted', 'community_invite', 'community_accepted'
+  )),
+  post_id bigint references public.posts (id) on delete cascade,
+  photo_id bigint references public.photos (id) on delete cascade,
+  video_id bigint references public.videos (id) on delete cascade,
+  community_id bigint references public.communities (id) on delete cascade,
+  comment_id bigint, -- id комментария (в своей таблице): чтобы убрать уведомление вместе с ним
+  text text not null default '' check (char_length(text) <= 200), -- начало комментария или записи
+  created_at timestamptz not null default now(),
+  read_at timestamptz
+);
+
+create index if not exists notifications_user_idx on public.notifications (user_id, created_at desc);
+create index if not exists notifications_unread_idx on public.notifications (user_id) where read_at is null;
+
+alter table public.notifications enable row level security;
+
+drop policy if exists "Свои уведомления видит получатель" on public.notifications;
+create policy "Свои уведомления видит получатель" on public.notifications
+  for select to authenticated using (user_id = (select auth.uid()));
+
+drop policy if exists "Отмечает прочитанным получатель" on public.notifications;
+create policy "Отмечает прочитанным получатель" on public.notifications
+  for update to authenticated
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+drop policy if exists "Скрывает уведомление получатель" on public.notifications;
+create policy "Скрывает уведомление получатель" on public.notifications
+  for delete to authenticated using (user_id = (select auth.uid()));
+
+-- Создавать уведомления напрямую нельзя — только триггерами ниже
+revoke insert, update on public.notifications from authenticated;
+grant update (read_at) on public.notifications to authenticated;
+
+-- Уведомить получателя (себя о своих действиях не уведомляем)
+create or replace function public.notify(
+  p_user uuid, p_actor uuid, p_type text,
+  p_post bigint default null, p_photo bigint default null, p_video bigint default null,
+  p_community bigint default null, p_comment bigint default null, p_text text default ''
+)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if p_user is null or p_user = p_actor then return; end if;
+  insert into public.notifications (user_id, actor_id, type, post_id, photo_id, video_id, community_id, comment_id, text)
+  values (p_user, p_actor, p_type, p_post, p_photo, p_video, p_community, p_comment, left(coalesce(p_text, ''), 200));
+end;
+$$;
+
+revoke execute on function public.notify(uuid, uuid, text, bigint, bigint, bigint, bigint, bigint, text) from public, anon, authenticated;
+
+-- ---------- Записи ----------
+create or replace function public.notify_post_like() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    perform public.notify((select author_id from public.posts where id = new.post_id), new.user_id, 'post_like', p_post => new.post_id);
+    return new;
+  end if;
+  delete from public.notifications where type = 'post_like' and post_id = old.post_id and actor_id = old.user_id;
+  return old;
+end $$;
+
+drop trigger if exists post_likes_notify on public.post_likes;
+create trigger post_likes_notify after insert or delete on public.post_likes
+  for each row execute function public.notify_post_like();
+
+create or replace function public.notify_post_comment() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  p public.posts;
+begin
+  if tg_op = 'DELETE' then
+    delete from public.notifications where type = 'post_comment' and comment_id = old.id;
+    return old;
+  end if;
+  select * into p from public.posts where id = new.post_id;
+  perform public.notify(p.author_id, new.author_id, 'post_comment', p_post => p.id, p_comment => new.id, p_text => new.text);
+  -- Хозяин стены тоже узнаёт о комментарии к чужой записи у себя
+  if p.owner_id is not null and p.owner_id <> p.author_id then
+    perform public.notify(p.owner_id, new.author_id, 'post_comment', p_post => p.id, p_comment => new.id, p_text => new.text);
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists post_comments_notify on public.post_comments;
+create trigger post_comments_notify after insert or delete on public.post_comments
+  for each row execute function public.notify_post_comment();
+
+create or replace function public.notify_post() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    -- Запись на чужой стене
+    if new.owner_id is not null and new.owner_id <> new.author_id then
+      perform public.notify(new.owner_id, new.author_id, 'wall_post', p_post => new.id, p_text => new.text);
+    end if;
+  elsif old.suggested and not new.suggested then
+    -- Предложенную новость опубликовали
+    perform public.notify(new.author_id, auth.uid(), 'post_approved', p_post => new.id, p_community => new.community_id, p_text => new.text);
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists posts_notify on public.posts;
+create trigger posts_notify after insert or update of suggested on public.posts
+  for each row execute function public.notify_post();
+
+-- ---------- Фото ----------
+create or replace function public.notify_photo_like() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    perform public.notify((select owner_id from public.photos where id = new.photo_id), new.user_id, 'photo_like', p_photo => new.photo_id);
+    return new;
+  end if;
+  delete from public.notifications where type = 'photo_like' and photo_id = old.photo_id and actor_id = old.user_id;
+  return old;
+end $$;
+
+drop trigger if exists photo_likes_notify on public.photo_likes;
+create trigger photo_likes_notify after insert or delete on public.photo_likes
+  for each row execute function public.notify_photo_like();
+
+create or replace function public.notify_photo_comment() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    perform public.notify((select owner_id from public.photos where id = new.photo_id), new.author_id, 'photo_comment',
+      p_photo => new.photo_id, p_comment => new.id, p_text => new.text);
+    return new;
+  end if;
+  delete from public.notifications where type = 'photo_comment' and comment_id = old.id;
+  return old;
+end $$;
+
+drop trigger if exists photo_comments_notify on public.photo_comments;
+create trigger photo_comments_notify after insert or delete on public.photo_comments
+  for each row execute function public.notify_photo_comment();
+
+-- ---------- Видео ----------
+create or replace function public.notify_video_like() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    perform public.notify((select owner_id from public.videos where id = new.video_id), new.user_id, 'video_like', p_video => new.video_id);
+    return new;
+  end if;
+  delete from public.notifications where type = 'video_like' and video_id = old.video_id and actor_id = old.user_id;
+  return old;
+end $$;
+
+drop trigger if exists video_likes_notify on public.video_likes;
+create trigger video_likes_notify after insert or delete on public.video_likes
+  for each row execute function public.notify_video_like();
+
+create or replace function public.notify_video_comment() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    perform public.notify((select owner_id from public.videos where id = new.video_id), new.author_id, 'video_comment',
+      p_video => new.video_id, p_comment => new.id, p_text => new.text);
+    return new;
+  end if;
+  delete from public.notifications where type = 'video_comment' and comment_id = old.id;
+  return old;
+end $$;
+
+drop trigger if exists video_comments_notify on public.video_comments;
+create trigger video_comments_notify after insert or delete on public.video_comments
+  for each row execute function public.notify_video_comment();
+
+-- ---------- Друзья ----------
+create or replace function public.notify_friendship() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    perform public.notify(new.addressee_id, new.requester_id, 'friend_request');
+    return new;
+  elsif tg_op = 'UPDATE' then
+    if old.status = 'pending' and new.status = 'accepted' then
+      delete from public.notifications
+        where type = 'friend_request' and user_id = new.addressee_id and actor_id = new.requester_id;
+      perform public.notify(new.requester_id, new.addressee_id, 'friend_accepted');
+    end if;
+    return new;
+  end if;
+  -- Заявку отменили или отклонили — уведомление о ней больше не нужно
+  delete from public.notifications
+    where type = 'friend_request' and user_id = old.addressee_id and actor_id = old.requester_id;
+  return old;
+end $$;
+
+drop trigger if exists friendships_notify on public.friendships;
+create trigger friendships_notify after insert or update or delete on public.friendships
+  for each row execute function public.notify_friendship();
+
+-- ---------- Сообщества ----------
+create or replace function public.notify_membership() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.status = 'invited' then
+      perform public.notify(new.user_id, auth.uid(), 'community_invite', p_community => new.community_id);
+    end if;
+    return new;
+  elsif tg_op = 'UPDATE' then
+    if old.status = 'requested' and new.status = 'member' then
+      perform public.notify(new.user_id, auth.uid(), 'community_accepted', p_community => new.community_id);
+    end if;
+    if old.status = 'invited' and new.status <> 'invited' then
+      delete from public.notifications
+        where type = 'community_invite' and user_id = new.user_id and community_id = new.community_id;
+    end if;
+    return new;
+  end if;
+  delete from public.notifications
+    where type = 'community_invite' and user_id = old.user_id and community_id = old.community_id;
+  return old;
+end $$;
+
+drop trigger if exists community_members_notify on public.community_members;
+create trigger community_members_notify after insert or update or delete on public.community_members
+  for each row execute function public.notify_membership();
+
+-- Realtime: новое уведомление приходит сразу
+do $$
+begin
+  alter publication supabase_realtime add table public.notifications;
+exception when duplicate_object then null;
+end $$;

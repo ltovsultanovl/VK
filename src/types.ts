@@ -76,6 +76,7 @@ export interface Person {
   color: string;
   avatar: string | null;
   city: string;
+  gender?: Gender; // для «оценил / оценила» в уведомлениях
   online?: boolean;
 }
 
@@ -340,6 +341,35 @@ export interface SendOptions {
   file?: File | null;
   voice?: VoiceMeta | null;
   shared?: Shared | null;
+}
+
+// ---------- Уведомления ----------
+
+export type NotificationType =
+  | "post_like"
+  | "post_comment"
+  | "wall_post"
+  | "post_approved"
+  | "photo_like"
+  | "photo_comment"
+  | "video_like"
+  | "video_comment"
+  | "friend_request"
+  | "friend_accepted"
+  | "community_invite"
+  | "community_accepted";
+
+export interface AppNotification {
+  id: number;
+  type: NotificationType;
+  text: string; // начало комментария или записи
+  createdAt: string;
+  readAt: string | null;
+  actor: Person | null;
+  post: { id: number; text: string; image: string | null; ownerId: string | null; communityId: number | null } | null;
+  photo: { id: number; src: string; ownerId: string } | null;
+  video: { id: number; title: string; poster: string | null } | null;
+  community: CommunityBrief | null;
 }
 
 // ---------- Общее ----------

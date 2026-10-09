@@ -1,10 +1,10 @@
 import { useState } from "react";
 import MeAvatar from "./MeAvatar";
-import { BellIcon, ChevronDownIcon, LogoutIcon, MoonIcon, SearchIcon } from "./Icons";
+import { ChevronDownIcon, LogoutIcon, MoonIcon, SearchIcon } from "./Icons";
+import NotificationsBell from "./notifications/NotificationsBell";
 import HeaderPlayer from "./music/HeaderPlayer";
 import { useSnackbar } from "./Snackbar";
 import { useProfile } from "../context/ProfileContext";
-import { useFriends } from "../context/FriendsContext";
 import { useDropdown } from "../hooks";
 import { explainError, signOut } from "../api";
 import type { Navigate } from "../types";
@@ -19,7 +19,6 @@ export default function Header({
   onToggleTheme: () => void;
 }) {
   const { name } = useProfile();
-  const { incoming } = useFriends();
   const showSnackbar = useSnackbar();
   const menu = useDropdown();
   const [query, setQuery] = useState("");
@@ -53,6 +52,10 @@ export default function Header({
           <span className="logo__text">вконтакте</span>
         </a>
 
+        {/* На узком телефоне поле не помещается — значок ведёт на страницу поиска людей */}
+        <button className="icon-btn header__search-btn" title="Поиск" onClick={() => onNavigate("friends/search")}>
+          <SearchIcon size={24} />
+        </button>
         <form className="search" role="search" onSubmit={search}>
           <SearchIcon size={16} />
           <input
@@ -64,18 +67,13 @@ export default function Header({
         </form>
 
         <div className="header__actions">
-          <button
-            className="icon-btn"
-            title={incoming.length ? `Заявки в друзья: ${incoming.length}` : "Уведомления"}
-            onClick={() => onNavigate("friends/requests")}
-          >
-            <BellIcon size={28} />
-            {incoming.length > 0 && <span className="badge">{incoming.length}</span>}
-          </button>
           <HeaderPlayer onNavigate={onNavigate} />
         </div>
 
         <div className="header__spacer" />
+
+        {/* Колокольчик — справа, рядом с аватаром */}
+        <NotificationsBell onNavigate={onNavigate} />
 
         <div className="profile-menu" ref={menu.ref}>
           <button className="header__user" onClick={menu.toggle}>

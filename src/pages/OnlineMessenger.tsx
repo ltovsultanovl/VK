@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Messenger, { type MessageState, type ViewDialog } from "./Messenger";
 import type { MessageRow } from "../types";
 import { messageSummary, useChat } from "../context/ChatContext";
@@ -75,6 +75,8 @@ export default function OnlineMessenger() {
   );
 
   const active = view.find((d) => d.id === activePeerId) ?? view[0] ?? null;
+  // Чат уже выбран до входа (кнопка «Написать сообщение») — на телефоне сразу открываем его
+  const [startInChat] = useState(() => !!activePeerId);
 
   // Закрепляем первый чат как выбранный: иначе при подгрузке друзей список пересортируется
   // и открытый чат сам переключится на другой — посреди набора текста или записи голосового
@@ -119,6 +121,7 @@ export default function OnlineMessenger() {
       onTyping={sendTyping}
       onRetry={(m) => retryMessage(m.raw)}
       onDelete={(m, forAll) => deleteMessage(m.raw, { forAll })}
+      startInChat={startInChat}
       emptyText="Здесь появятся ваши друзья и переписки. Найдите знакомых в разделе «Друзья»"
     />
   );

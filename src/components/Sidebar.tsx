@@ -13,13 +13,13 @@ import {
 } from "./Icons";
 import type { Navigate } from "../types";
 
-interface MenuItem {
+export interface MenuItem {
   view?: string;
   Icon: Icon;
   label: string;
 }
 
-const groups: MenuItem[][] = [
+export const NAV_GROUPS: MenuItem[][] = [
   [
     { view: "profile", Icon: UserIcon, label: "Профиль" },
     { view: "feed", Icon: NewsIcon, label: "Лента" },
@@ -39,6 +39,10 @@ const groups: MenuItem[][] = [
 const FOOTER_LINKS = ["Блог", "Разработчикам", "Для бизнеса", "Ещё"];
 
 // counters — числа у пунктов по их view: { messages: 3, friends: 1 }
+// Подразделы подсвечивают свой раздел: редактирование — профиль, сообщество — «Сообщества»
+export const activeSection = (view: string) =>
+  ({ edit: "profile", club: "communities" } as Record<string, string>)[view] ?? view;
+
 export default function Sidebar({
   view,
   onNavigate,
@@ -49,7 +53,7 @@ export default function Sidebar({
   counters?: Record<string, number>;
 }) {
   // Редактирование профиля — подраздел профиля
-  const activeView = ({ edit: "profile", club: "communities" } as Record<string, string>)[view] ?? view;
+  const activeView = activeSection(view);
 
   const renderItem = ({ view: target, Icon, label }: MenuItem) => {
     const value = target ? counters[target] : 0;
@@ -74,7 +78,7 @@ export default function Sidebar({
 
   return (
     <nav className="sidebar">
-      {groups.map((items, i) => (
+      {NAV_GROUPS.map((items, i) => (
         <div key={i}>
           {i > 0 && <div className="separator" />}
           {items.map(renderItem)}

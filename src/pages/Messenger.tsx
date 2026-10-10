@@ -3,6 +3,7 @@ import type { AttachmentType, ChatPeer, Shared, VoiceMeta } from "../types";
 import { createPortal } from "react-dom";
 import Avatar from "../components/Avatar";
 import EmojiPicker from "../components/EmojiPicker";
+import BlockModal from "../components/BlockModal";
 import SharedCard from "../components/SharedCard";
 import Modal from "../components/Modal";
 import { useSnackbar } from "../components/Snackbar";
@@ -18,6 +19,7 @@ import { MAX_FILE_MB, attachmentKind } from "../api";
 import {
   ArchiveIcon,
   AttachIcon,
+  BlockIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronUpIcon,
@@ -38,7 +40,7 @@ import {
   WriteIcon,
 } from "../components/Icons";
 
-type Folder = "Все" | "Непрочитанные" | "Личные" | "Архив";
+type Folder = "Все" | "Непрочитанные" | "Архив";
 
 // Подсветка найденного текста в сообщении
 function Highlighted({ text, query }: { text: string; query: string }) {
@@ -90,6 +92,7 @@ export interface ViewDialog<R = unknown> {
   pinned?: boolean;
   archived?: boolean;
   markedUnread?: boolean;
+  blocked?: "byMe" | "me"; // я заблокировал собеседника / он заблокировал меня
   unread: number;
   typing?: boolean;
   time: string;
@@ -525,23 +528,51 @@ export interface ChatMenuActions {
   togglePin: (id: string) => void;
   toggleArchive: (id: string) => void;
   markUnread: (id: string) => void;
+  block: (id: string) => void;
+  unblock: (id: string) => void;
 }
 
 function ChatMenu({
   dialog,
   actions,
-  onSearch,
   onLeave,
+  inList = false,
 }: {
   dialog: ViewDialog<unknown>;
   actions?: ChatMenuActions;
-  onSearch: () => void;
-  onLeave: () => void; // на телефоне после «непрочитанным» / «в архив» возвращаемся к списку
+  onLeave?: () => void; // на телефоне после «непрочитанным» / «в архив» возвращаемся к списку
+  inList?: boolean; // «⋯» у чата в списке: меню поверх списка, чтобы его не обрезала прокрутка
 }) {
   const menu = useDropdown();
-  const item = (label: string, Icon: typeof PinIcon, run: () => void) => (
+  const [confirmBlock, setConfirmBlock] = useState(false);
+  const [place, setPlace] = useState<React.CSSProperties>();
+  // Меню из списка висит поверх страницы — при прокрутке закрываем, чтобы оно не отрывалось от чата
+  const { open, close } = menu;
+  useEffect(() => {
+    if (!inList || !open) return;
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [inList, open, close]);
+  if (!actions) return null;
+  const toggle = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (inList && !menu.open) {
+      const r = e.currentTarget.getBoundingClientRect();
+      const below = r.bottom + 220 < window.innerHeight;
+      setPlace({
+        position: "fixed",
+        right: window.innerWidth - r.right,
+        ...(below ? { top: r.bottom + 4 } : { bottom: window.innerHeight - r.top + 4 }),
+      });
+    }
+    menu.toggle();
+  };
+  const item = (label: string, Icon: typeof PinIcon, run: () => void, danger = false) => (
     <button
-      className="dropdown__item"
+      className={`dropdown__item ${danger ? "dropdown__item--danger" : ""}`}
       onClick={() => {
         menu.close();
         run();
@@ -551,13 +582,12 @@ function ChatMenu({
     </button>
   );
   return (
-    <div className="chat-menu" ref={menu.ref}>
-      <button className="icon-btn" title="Ещё" onClick={menu.toggle}>
-        <MoreIcon size={22} />
+    <div className={`chat-menu ${inList ? "chat-menu--list" : ""} ${menu.open ? "chat-menu--open" : ""}`} ref={menu.ref}>
+      <button className="icon-btn" title="Действия с чатом" aria-label="Действия с чатом" onClick={toggle}>
+        <MoreIcon size={inList ? 20 : 22} />
       </button>
       {menu.open && (
-        <div className="dropdown dropdown--right chat-menu__dropdown">
-          {item("Поиск по сообщениям", SearchIcon, onSearch)}
+        <div className="dropdown dropdown--right chat-menu__dropdown" style={inList ? place : undefined}>
           {actions && (
             <>
               {!dialog.archived &&
@@ -566,15 +596,29 @@ function ChatMenu({
                 dialog.unread === 0 &&
                 item("Отметить непрочитанным", UnreadIcon, () => {
                   actions.markUnread(dialog.id);
-                  onLeave();
+                  onLeave?.();
                 })}
               {item(dialog.archived ? "Вернуть из архива" : "Архивировать чат", ArchiveIcon, () => {
                 actions.toggleArchive(dialog.id);
-                if (!dialog.archived) onLeave();
+                if (!dialog.archived) onLeave?.();
               })}
+              {!dialog.person.isCommunity &&
+                (dialog.blocked === "byMe"
+                  ? item("Разблокировать", BlockIcon, () => actions.unblock(dialog.id))
+                  : item("Заблокировать", BlockIcon, () => setConfirmBlock(true), true))}
             </>
           )}
         </div>
+      )}
+      {confirmBlock && (
+        <BlockModal
+          person={dialog.person}
+          onClose={() => setConfirmBlock(false)}
+          onConfirm={() => {
+            setConfirmBlock(false);
+            actions.block(dialog.id);
+          }}
+        />
       )}
     </div>
   );
@@ -638,13 +682,11 @@ export default function Messenger<R>({
   }, [active?.messages.length, active?.id, active?.typing]);
 
   const archivedCount = dialogs.filter((d) => d.archived).length;
-  const folders: Folder[] = archivedCount ? ["Все", "Непрочитанные", "Личные", "Архив"] : ["Все", "Непрочитанные", "Личные"];
+  const folders: Folder[] = archivedCount ? ["Все", "Непрочитанные", "Архив"] : ["Все", "Непрочитанные"];
   const inFolder = (d: ViewDialog<R>) =>
     folder === "Архив"
       ? d.archived
-      : !d.archived &&
-        (folder !== "Непрочитанные" || d.unread > 0 || !!d.markedUnread) &&
-        (folder !== "Личные" || !d.person.isCommunity);
+      : !d.archived && (folder !== "Непрочитанные" || d.unread > 0 || !!d.markedUnread);
   const q = query.trim();
   const visible = dialogs.filter((d) => inFolder(d) && d.person.name.toLowerCase().includes(q.toLowerCase()));
   // Поиск в списке находит и сами сообщения во всех переписках (новые сверху)
@@ -847,8 +889,8 @@ export default function Messenger<R>({
           {visible.map((d) => {
             const last = d.messages.at(-1);
             return (
+              <div key={d.id} className={`dialog-row ${chatActions ? "dialog-row--menu" : ""}`}>
               <button
-                key={d.id}
                 type="button"
                 className={`dialog ${d.id === active?.id ? "active" : ""} ${d.pinned ? "dialog--pinned" : ""}`}
                 onClick={() => {
@@ -899,6 +941,9 @@ export default function Messenger<R>({
                   </span>
                 </span>
               </button>
+              {/* Те же действия, что в «⋯» открытого чата */}
+              <ChatMenu dialog={d} actions={chatActions} inList />
+              </div>
             );
           })}
           {visible.length === 0 && messageHits.length === 0 && (
@@ -978,7 +1023,6 @@ export default function Messenger<R>({
             <ChatMenu
               dialog={active}
               actions={chatActions}
-              onSearch={() => setSearch({ q: "", currentId: null })}
               onLeave={() => setChatOpen(false)}
             />
           </div>
@@ -1078,7 +1122,20 @@ export default function Messenger<R>({
             </div>
           )}
 
-          {recorder.recording ? (
+          {active.blocked ? (
+            <div className="chat-blocked">
+              {active.blocked === "byMe" ? (
+                <>
+                  Вы заблокировали этого пользователя
+                  <button type="button" className="btn btn--secondary btn--sm" onClick={() => chatActions?.unblock(active.id)}>
+                    Разблокировать
+                  </button>
+                </>
+              ) : (
+                "Вы не можете отправить сообщение этому пользователю, так как он ограничил круг лиц, которые могут присылать ему сообщения."
+              )}
+            </div>
+          ) : recorder.recording ? (
             <form
               className="chat__composer chat__composer--recording"
               onSubmit={(e) => {

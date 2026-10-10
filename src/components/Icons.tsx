@@ -567,3 +567,10 @@ export const UnreadIcon = (p: IconProps) => (
     <circle cx="18.5" cy="5.5" r="2.5" fill="currentColor" stroke="none" />
   </Svg>
 );
+
+export const BlockIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="m6 6 12 12" />
+  </Svg>
+);

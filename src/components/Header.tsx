@@ -1,6 +1,6 @@
 import { useState } from "react";
 import MeAvatar from "./MeAvatar";
-import { ChevronDownIcon, LogoutIcon, MoonIcon, SearchIcon } from "./Icons";
+import { ChevronDownIcon, BlockIcon, LogoutIcon, MoonIcon, SearchIcon } from "./Icons";
 import NotificationsBell from "./notifications/NotificationsBell";
 import HeaderPlayer from "./music/HeaderPlayer";
 import { useSnackbar } from "./Snackbar";
@@ -95,6 +95,9 @@ export default function Header({
                 <MoonIcon /> Тема
                 <span className="muted">{theme === "dark" ? "Тёмная" : "Светлая"}</span>
               </button>
+              <a href="#blacklist" className="dropdown__item" onClick={go("blacklist")}>
+                <BlockIcon /> Чёрный список
+              </a>
               <div className="separator" />
               <button className="dropdown__item" onClick={logout}>
                 <LogoutIcon /> Выйти

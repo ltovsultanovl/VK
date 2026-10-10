@@ -5815,3 +5815,151 @@ textarea {
     font-size: 16px; /* без автозума на iPhone */
   }
 }
+
+/* =========================================================
+   Чёрный список
+   ========================================================= */
+.profile-more {
+  position: relative;
+}
+.profile-more__dropdown {
+  top: calc(100% + 4px);
+  z-index: 20;
+  width: max-content;
+  min-width: 220px;
+}
+.profile-blocked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 20px 32px;
+  border-top: 1px solid var(--separator);
+  color: var(--icon-secondary);
+  text-align: center;
+}
+.profile-blocked__title {
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 500;
+}
+.profile-blocked--mine {
+  display: block;
+  padding: 12px 20px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+.block-modal p {
+  margin: 0 0 12px;
+  line-height: 1.45;
+}
+.block-modal__muted {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.blacklist {
+  padding: 16px 20px 20px;
+}
+.blacklist__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.blacklist__hint {
+  margin: 8px 0 12px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.blacklist__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--separator);
+}
+.blacklist__info {
+  flex: 1;
+  min-width: 0;
+}
+.blacklist__name {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.blacklist__info .muted {
+  font-size: 13px;
+}
+.blacklist__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--icon-secondary);
+}
+
+/* Чат с блокировкой: вместо поля ввода — объяснение */
+.chat-blocked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px calc(14px + var(--safe-bottom, 0px));
+  border-top: 1px solid var(--separator);
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-align: center;
+}
+
+/* «⋯» у чата в списке: появляется при наведении, на сенсорных экранах видна всегда */
+.dialog-row {
+  position: relative;
+}
+.chat-menu--list {
+  position: absolute;
+  top: 0;
+  right: 6px;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.chat-menu--list > .icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--separator);
+}
+.dialog-row:hover .chat-menu--list,
+.chat-menu--list.chat-menu--open,
+.chat-menu--list:focus-within {
+  opacity: 1;
+}
+/* Пока видна «⋯», прячем под ней время и счётчик */
+.dialog-row--menu:hover .dialog__time,
+.dialog-row--menu:has(.chat-menu--open) .dialog__time {
+  visibility: hidden;
+}
+@media (hover: none) {
+  .chat-menu--list {
+    right: 2px;
+    opacity: 1;
+  }
+  .chat-menu--list > .icon-btn {
+    background: none;
+    box-shadow: none;
+    color: var(--icon-secondary);
+  }
+  .dialog-row--menu .dialog {
+    padding-right: 38px;
+  }
+  .dialog-row--menu:has(.chat-menu--open) .dialog__time {
+    visibility: visible;
+  }
+}

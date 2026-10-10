@@ -20,6 +20,7 @@ import { PlayerProvider } from "./context/PlayerContext";
 import { MusicProvider } from "./context/MusicContext";
 import { VideoProvider } from "./context/VideoContext";
 import { NotificationsProvider } from "./context/NotificationsContext";
+import { BlocksProvider } from "./context/BlocksContext";
 import { supabaseConfigured } from "./lib/supabase";
 import { useStoredState } from "./hooks";
 
@@ -36,6 +37,7 @@ const Notifications = lazyPage(() => import("./pages/Notifications"));
 const Community = lazyPage(() => import("./pages/Community"));
 const CommunityManage = lazyPage(() => import("./pages/CommunityManage"));
 const EditProfile = lazyPage(() => import("./pages/EditProfile"));
+const Blacklist = lazyPage(() => import("./pages/Blacklist"));
 
 
 // Тему до отрисовки уже поставил скрипт в index.html (с учётом системной)
@@ -60,6 +62,7 @@ const VIEWS = [
   "music",
   "video",
   "notifications",
+  "blacklist",
 ];
 const readRoute = () => {
   const [path, search = ""] = decodeURIComponent(
@@ -181,6 +184,7 @@ function Shell({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => vo
               />
             )}
             {view === "notifications" && <Notifications onNavigate={navigate} />}
+            {view === "blacklist" && <Blacklist />}
             {view === "video" && (
               <Video
                 section={param}
@@ -243,6 +247,7 @@ export default function App() {
   return (
     <ProfileProvider key={session.user.id} userId={session.user.id}>
       <FriendsProvider>
+        <BlocksProvider>
         <CommunitiesProvider>
           <ChatProvider>
             <PlayerProvider>
@@ -261,6 +266,7 @@ export default function App() {
             </PlayerProvider>
           </ChatProvider>
         </CommunitiesProvider>
+        </BlocksProvider>
       </FriendsProvider>
     </ProfileProvider>
   );

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Avatar from "../components/Avatar";
 import Composer from "../components/Composer";
 import PostList from "../components/PostList";
@@ -7,6 +7,8 @@ import ProfileDetailsModal from "../components/ProfileDetailsModal";
 import PhotoViewer from "../components/PhotoViewer";
 import ConfirmModal from "../components/ConfirmModal";
 import FriendButton from "../components/FriendButton";
+import BlockModal from "../components/BlockModal";
+import { useBlocks } from "../context/BlocksContext";
 import ShareModal from "../components/ShareModal";
 import AlbumsTab from "../components/media/AlbumsTab";
 import MusicTab from "../components/media/MusicTab";
@@ -15,6 +17,7 @@ import ArticlesTab from "../components/media/ArticlesTab";
 import { useSnackbar } from "../components/Snackbar";
 import {
   AlbumsIcon,
+  BlockIcon,
   ArticlesIcon,
   CameraIcon,
   CloseIcon,
@@ -22,6 +25,7 @@ import {
   InfoIcon,
   MapPinIcon,
   MessageIcon,
+  MoreIcon,
   MusicIcon,
   ShareIcon,
   PhotoIcon,
@@ -746,13 +750,57 @@ function SubscriptionsCard({ userId, isMe }: { userId: string; isMe: boolean }) 
   );
 }
 
+// ---------- «⋯» на чужой странице: заблокировать / разблокировать ----------
+function ProfileMoreMenu({ person }: { person: Person }) {
+  const menu = useDropdown();
+  const { isBlocked, block, unblock } = useBlocks();
+  const [confirm, setConfirm] = useState(false);
+  const blocked = isBlocked(person.id);
+  return (
+    <div className="profile-more" ref={menu.ref}>
+      <button className="btn btn--neutral btn--icon" title="Ещё" onClick={menu.toggle}>
+        <MoreIcon size={18} />
+      </button>
+      {menu.open && (
+        <div className="dropdown dropdown--right profile-more__dropdown">
+          <button
+            className={`dropdown__item ${blocked ? "" : "dropdown__item--danger"}`}
+            onClick={() => {
+              menu.close();
+              if (blocked) unblock(person);
+              else setConfirm(true);
+            }}
+          >
+            <BlockIcon /> {blocked ? "Разблокировать" : "Заблокировать"}
+          </button>
+        </div>
+      )}
+      {confirm && (
+        <BlockModal
+          person={person}
+          onClose={() => setConfirm(false)}
+          onConfirm={() => {
+            setConfirm(false);
+            block(person);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 // ---------- Страница ----------
 export default function Profile({ userId, onNavigate }: { userId: string; onNavigate: Navigate }) {
   const { myId, profile: myProfile } = useProfile();
   const { relationTo } = useFriends();
   const { openChat } = useChatActions();
+  const { isBlocked, hasBlockedMe, unblock, refreshBlockedMe } = useBlocks();
   const isMe = userId === myId;
   const other = useUserProfile(isMe ? myId : userId);
+  // Не заблокировал ли меня хозяин страницы — проверяем при каждом открытии
+  useEffect(() => {
+    if (!isMe) refreshBlockedMe();
+  }, [isMe, userId, refreshBlockedMe]);
   const profile = isMe ? myProfile : other.data;
   const feed = usePosts({ wall: userId });
   const album = usePhotos(userId); // общий для аватара и блока «Фото»
@@ -799,9 +847,39 @@ export default function Profile({ userId, onNavigate }: { userId: string; onNavi
     color: profile.color,
     avatar: profile.avatar,
     city: profile.contacts.city,
+    gender: profile.gender,
   };
   const education = formatEducation(profile.education);
-  const canPost = isMe || relationTo(userId) === "friend";
+  const iBlocked = !isMe && isBlocked(userId);
+  const blockedMe = !isMe && hasBlockedMe(userId);
+  const canPost = (isMe || relationTo(userId) === "friend") && !iBlocked && !blockedMe;
+  const she = profile.gender === "female";
+
+  // Меня заблокировали — как в VK: только имя и аватар, без записей и кнопок
+  if (blockedMe) {
+    return (
+      <div className="card profile-head">
+        <div className="profile-cover" style={{ background: DEFAULT_COVER }} />
+        <div className="profile-info">
+          <div className="profile-info__avatar">
+            <div className="avatar-frame">
+              <Avatar name={name} color={profile.color} src={profile.avatar} size={148} />
+            </div>
+          </div>
+          <div className="profile-info__meta">
+            <h1 className="profile-info__name">{name}</h1>
+          </div>
+        </div>
+        <div className="profile-blocked">
+          <BlockIcon size={40} />
+          <div className="profile-blocked__title">
+            {profile.firstName} {she ? "ограничила" : "ограничил"} вам доступ к своей странице
+          </div>
+          <div className="muted">Вы не можете просматривать записи, писать сообщения и добавлять в друзья.</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -847,18 +925,23 @@ export default function Profile({ userId, onNavigate }: { userId: string; onNavi
               >
                 Редактировать профиль
               </button>
+            ) : iBlocked ? (
+              <button className="btn" onClick={() => unblock(person)}>
+                Разблокировать
+              </button>
             ) : (
               <>
                 <FriendButton person={person} />
                 <button
-                  className="btn btn--neutral"
+                  className="btn btn--neutral btn--icon"
+                  title="Написать сообщение"
+                  aria-label="Написать сообщение"
                   onClick={() => {
                     openChat(person);
                     onNavigate("messages");
                   }}
                 >
                   <MessageIcon size={18} />
-                  Сообщение
                 </button>
               </>
             )}
@@ -869,8 +952,15 @@ export default function Profile({ userId, onNavigate }: { userId: string; onNavi
             >
               <ShareIcon size={18} />
             </button>
+            {!isMe && <ProfileMoreMenu person={person} />}
           </div>
         </div>
+        {iBlocked && (
+          <div className="profile-blocked profile-blocked--mine">
+            {name} в вашем чёрном списке: {she ? "она" : "он"} не может писать вам, комментировать ваши записи и не
+            видит вашу страницу.
+          </div>
+        )}
       </div>
 
       {sharing && (

@@ -4,6 +4,7 @@ import type { MessageRow } from "../types";
 import { messageSummary, useChat } from "../context/ChatContext";
 import { formatDay, formatDialogTime, formatTime } from "../utils";
 import { usePageVisible } from "../hooks";
+import { useBlocks } from "../context/BlocksContext";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -35,7 +36,21 @@ export default function OnlineMessenger() {
     markUnread,
     clearMarkedUnread,
   } = useChat();
-  const chatActions = useMemo(() => ({ togglePin, toggleArchive, markUnread }), [togglePin, toggleArchive, markUnread]);
+  const { isBlocked, hasBlockedMe, block, unblock, refreshBlockedMe } = useBlocks();
+  const chatActions = useMemo(() => {
+    const peer = (id: string) => dialogs.find((d) => d.person.id === id)?.person;
+    const asPerson = (id: string) => {
+      const p = peer(id);
+      return { id, firstName: p?.firstName ?? p?.name ?? "" };
+    };
+    return {
+      togglePin,
+      toggleArchive,
+      markUnread,
+      block: (id: string) => void block(asPerson(id)),
+      unblock: (id: string) => void unblock(asPerson(id)),
+    };
+  }, [togglePin, toggleArchive, markUnread, block, unblock, dialogs]);
 
   // Готовые сообщения кешируем по исходной строке: если строка та же, отдаём тот же объект —
   // тогда «печатает…», «в сети» и новые сообщения не перерисовывают уже показанные
@@ -51,6 +66,7 @@ export default function OnlineMessenger() {
         pinned: d.pinned,
         archived: d.archived,
         markedUnread: d.markedUnread,
+        blocked: d.isCommunity ? undefined : isBlocked(d.person.id) ? "byMe" : hasBlockedMe(d.person.id) ? "me" : undefined,
         unread: d.unread,
         typing: d.typing,
         time: formatDialogTime(d.last?.created_at),
@@ -88,7 +104,7 @@ export default function OnlineMessenger() {
           return message;
         }),
       })),
-    [dialogs, myId, fileUrls],
+    [dialogs, myId, fileUrls, isBlocked, hasBlockedMe],
   );
 
   const active = view.find((d) => d.id === activePeerId) ?? view[0] ?? null;
@@ -103,6 +119,11 @@ export default function OnlineMessenger() {
 
   // Прочитано — только когда собеседник действительно видит чат: он открыт и вкладка на экране.
   // Свернул окно — новые сообщения ждут; вернулся — сразу отмечаем (у отправителя станет ✓✓)
+  // Открыли чат — заодно проверяем, не заблокировал ли нас собеседник
+  useEffect(() => {
+    if (active?.id) refreshBlockedMe();
+  }, [active?.id, refreshBlockedMe]);
+
   const pageVisible = usePageVisible();
   useEffect(() => {
     if (pageVisible && active?.unread) markRead(active.id);

@@ -186,6 +186,7 @@ export const explainError = (error: unknown): string => {
   if (/same.*password|different from the old/i.test(text)) return "Новый пароль должен отличаться от старого";
   if (/expired|invalid.*(token|otp)|token.*invalid/i.test(text)) return "Код неверный или устарел. Запросите новый";
   if (/find_profile_by_email/i.test(text)) return "Поиск по почте ещё не включён: выполните обновлённый supabase/schema.sql в SQL Editor";
+  if (/Блокировка/.test(text)) return "Действие недоступно: пользователь в чёрном списке";
   if (/row-level security|permission denied/i.test(text)) return "Нет прав на это действие";
   if (/violates check constraint/i.test(text)) return "Некорректные данные — проверьте, что всё заполнено правильно";
   if (
@@ -1417,3 +1418,24 @@ export const saveChatSetting = async (myId: string, setting: ChatSetting) =>
       { onConflict: "user_id,peer" },
     ),
   );
+
+// ---------- Чёрный список ----------
+
+export interface BlockedPerson {
+  person: Person;
+  since: string;
+}
+
+export const fetchBlocked = async (): Promise<BlockedPerson[]> =>
+  unwrap<{ created_at: string; blocked: PersonRow }[]>(
+    await supabase
+      .from("blocks")
+      .select(`created_at, blocked:profiles!blocks_blocked_id_fkey(${PERSON_FIELDS})`)
+      .order("created_at", { ascending: false }),
+  ).map((r) => ({ person: toPerson(r.blocked), since: r.created_at }));
+
+// id тех, кто заблокировал меня
+export const fetchBlockedMe = async () => unwrap<string[]>(await supabase.rpc("blocked_me_ids"));
+
+export const blockUser = (userId: string) => rpc("block_user", { u: userId });
+export const unblockUser = (userId: string) => rpc("unblock_user", { u: userId });

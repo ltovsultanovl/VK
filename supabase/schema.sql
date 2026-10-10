@@ -1827,3 +1827,180 @@ begin
   alter publication supabase_realtime add table public.chat_settings;
 exception when duplicate_object then null;
 end $$;
+
+-- =========================================================
+-- Чёрный список, как в VK.
+-- Заблокированный не может: писать сообщения, отправлять заявку в друзья,
+-- писать на стене, комментировать и лайкать записи, фото и видео того, кто его заблокировал,
+-- и не видит его записи и фото. Сообщения между ними запрещены в обе стороны.
+-- Запреты — отдельными RESTRICTIVE-правилами: они действуют поверх всех остальных
+-- =========================================================
+create table if not exists public.blocks (
+  blocker_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  blocked_id uuid not null references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (blocker_id, blocked_id),
+  check (blocker_id <> blocked_id)
+);
+
+create index if not exists blocks_blocked_idx on public.blocks (blocked_id);
+
+alter table public.blocks enable row level security;
+
+-- Свой чёрный список видит только его владелец; менять — только через функции ниже
+drop policy if exists "Свой чёрный список" on public.blocks;
+create policy "Свой чёрный список" on public.blocks
+  for select to authenticated using (blocker_id = (select auth.uid()));
+
+revoke insert, update, delete on public.blocks from authenticated;
+
+-- a заблокировал b?
+create or replace function public.has_blocked(a uuid, b uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (select 1 from public.blocks where blocker_id = a and blocked_id = b);
+$$;
+
+-- Между a и b есть блокировка в любую сторону
+create or replace function public.is_blocked_between(a uuid, b uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (
+    select 1 from public.blocks
+    where (blocker_id = a and blocked_id = b) or (blocker_id = b and blocked_id = a)
+  );
+$$;
+
+-- Для интерфейса: я заблокировал человека / он заблокировал меня
+create or replace function public.block_state(u uuid)
+returns table (i_blocked boolean, blocked_me boolean)
+language sql stable security definer set search_path = public
+as $$
+  select public.has_blocked(auth.uid(), u), public.has_blocked(u, auth.uid());
+$$;
+
+-- Заблокировать: заодно удаляем дружбу и заявки в обе стороны
+create or replace function public.block_user(u uuid)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  me uuid := auth.uid();
+begin
+  if me is null then raise exception 'Нужно войти'; end if;
+  if u = me then raise exception 'Нельзя заблокировать самого себя'; end if;
+  insert into public.blocks (blocker_id, blocked_id) values (me, u) on conflict do nothing;
+  delete from public.friendships
+    where (requester_id = me and addressee_id = u) or (requester_id = u and addressee_id = me);
+end;
+$$;
+
+create or replace function public.unblock_user(u uuid)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  delete from public.blocks where blocker_id = auth.uid() and blocked_id = u;
+end;
+$$;
+
+-- Владелец записи / фото / видео заблокировал u? Функция видит строку, даже если u её не видит:
+-- иначе запрет не сработал бы (запись скрыта от заблокированного → «ничего не найдено» → можно)
+create or replace function public.content_blocked(kind text, obj bigint, u uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select case kind
+    when 'post' then exists (
+      select 1 from public.posts p
+      where p.id = obj and (public.has_blocked(p.author_id, u) or (p.owner_id is not null and public.has_blocked(p.owner_id, u)))
+    )
+    when 'photo' then exists (select 1 from public.photos ph where ph.id = obj and public.has_blocked(ph.owner_id, u))
+    when 'video' then exists (select 1 from public.videos v where v.id = obj and public.has_blocked(v.owner_id, u))
+    else false
+  end;
+$$;
+
+do $$
+declare
+  f text;
+begin
+  foreach f in array array['has_blocked(uuid, uuid)', 'is_blocked_between(uuid, uuid)', 'block_state(uuid)', 'block_user(uuid)', 'unblock_user(uuid)', 'content_blocked(text, bigint, uuid)'] loop
+    execute format('revoke execute on function public.%s from public, anon', f);
+    execute format('grant execute on function public.%s to authenticated', f);
+  end loop;
+end $$;
+
+-- ---------- Запреты ----------
+-- Сообщения: ни в одну сторону
+drop policy if exists "Блокировка: сообщения" on public.messages;
+create policy "Блокировка: сообщения" on public.messages
+  as restrictive for insert to authenticated
+  with check (not public.is_blocked_between(sender_id, recipient_id));
+
+-- Заявки в друзья: ни в одну сторону
+drop policy if exists "Блокировка: заявки в друзья" on public.friendships;
+create policy "Блокировка: заявки в друзья" on public.friendships
+  as restrictive for insert to authenticated
+  with check (not public.is_blocked_between(requester_id, addressee_id));
+
+-- Записи: заблокированный не пишет на стене и не видит записи на стене того, кто его заблокировал
+drop policy if exists "Блокировка: запись на стене" on public.posts;
+create policy "Блокировка: запись на стене" on public.posts
+  as restrictive for insert to authenticated
+  with check (owner_id is null or not public.has_blocked(owner_id, author_id));
+
+drop policy if exists "Блокировка: чужая стена скрыта" on public.posts;
+create policy "Блокировка: чужая стена скрыта" on public.posts
+  as restrictive for select to authenticated
+  using (owner_id is null or not public.has_blocked(owner_id, (select auth.uid())));
+
+-- Фото: заблокированный не видит фото того, кто его заблокировал
+drop policy if exists "Блокировка: фото скрыты" on public.photos;
+create policy "Блокировка: фото скрыты" on public.photos
+  as restrictive for select to authenticated
+  using (community_id is not null or not public.has_blocked(owner_id, (select auth.uid())));
+
+-- Комментарии и лайки к записям, фото и видео того, кто заблокировал
+drop policy if exists "Блокировка: комментарии к записям" on public.post_comments;
+create policy "Блокировка: комментарии к записям" on public.post_comments
+  as restrictive for insert to authenticated
+  with check (not public.content_blocked('post', post_id, author_id));
+
+drop policy if exists "Блокировка: лайки записей" on public.post_likes;
+create policy "Блокировка: лайки записей" on public.post_likes
+  as restrictive for insert to authenticated
+  with check (not public.content_blocked('post', post_id, user_id));
+
+drop policy if exists "Блокировка: комментарии к фото" on public.photo_comments;
+create policy "Блокировка: комментарии к фото" on public.photo_comments
+  as restrictive for insert to authenticated
+  with check (not public.content_blocked('photo', photo_id, author_id));
+
+drop policy if exists "Блокировка: лайки фото" on public.photo_likes;
+create policy "Блокировка: лайки фото" on public.photo_likes
+  as restrictive for insert to authenticated
+  with check (not public.content_blocked('photo', photo_id, user_id));
+
+drop policy if exists "Блокировка: комментарии к видео" on public.video_comments;
+create policy "Блокировка: комментарии к видео" on public.video_comments
+  as restrictive for insert to authenticated
+  with check (not public.content_blocked('video', video_id, author_id));
+
+drop policy if exists "Блокировка: лайки видео" on public.video_likes;
+create policy "Блокировка: лайки видео" on public.video_likes
+  as restrictive for insert to authenticated
+  with check (not public.content_blocked('video', video_id, user_id));
+
+-- Кто заблокировал меня (для мессенджера: вместо поля ввода — «пользователь ограничил круг лиц…»)
+create or replace function public.blocked_me_ids()
+returns setof uuid
+language sql stable security definer set search_path = public
+as $$
+  select blocker_id from public.blocks where blocked_id = auth.uid();
+$$;
+
+revoke execute on function public.blocked_me_ids() from public, anon;
+grant execute on function public.blocked_me_ids() to authenticated;

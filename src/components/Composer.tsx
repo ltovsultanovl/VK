@@ -27,9 +27,29 @@ export default function Composer({
   const expanded = focused || text.length > 0 || image;
   const canPublish = (text.trim() || image) && !sending;
 
+  // Пока открыто окно выбора файла, поле теряет фокус — это не «передумал писать».
+  // Раньше на этом месте пустой композер закрывался вместе с выбором файла, и фото не прикреплялось
+  const picking = useRef(false);
+  const openPicker = () => {
+    picking.current = true;
+    window.addEventListener(
+      "focus",
+      () => {
+        // Окно выбора закрыто (выбрали файл или отменили) — возвращаем курсор в поле
+        setTimeout(() => {
+          picking.current = false;
+          ref.current?.focus();
+        }, 300);
+      },
+      { once: true },
+    );
+    picker.open();
+  };
+
   const picker = useFilePicker({
     accept: "image/*",
     onPick: async ([file]) => {
+      picking.current = false;
       try {
         setImage(await readImage(file, { max: 1600, quality: 0.85 }));
       } catch (e) {
@@ -69,6 +89,7 @@ export default function Composer({
         value={text}
         onFocus={() => setFocused(true)}
         onBlur={() => {
+          if (picking.current) return;
           setFocused(false);
           if (!text.trim() && !image) onCancel?.();
         }}
@@ -82,7 +103,7 @@ export default function Composer({
           className="icon-btn"
           title="Прикрепить фотографию"
           onMouseDown={(e) => e.preventDefault()}
-          onClick={picker.open}
+          onClick={openPicker}
         >
           <PhotoIcon />
         </button>

@@ -16,15 +16,31 @@ export const plural = (n: number, [one, few, many]: readonly [string, string, st
 // Читает картинку из файла и ужимает её через canvas,
 // чтобы dataURL поместился в localStorage.
 // square: true — центрированная квадратная обрезка (для аватара)
+// data:-ссылка → файл. Без fetch(): политика безопасности сайта (CSP) запрещает запросы к data:,
+// и на опубликованном сайте загрузка фото из-за этого падала с «Нет связи с сервером»
+export const dataUrlToBlob = (dataUrl: string): Blob => {
+  const [head, body = ''] = dataUrl.split(',');
+  const type = head.match(/^data:([^;]+)/)?.[1] ?? 'application/octet-stream';
+  if (!head.includes(';base64')) return new Blob([decodeURIComponent(body)], { type });
+  const bin = atob(body);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type });
+};
+
+const IMAGE_EXT = /\.(jpe?g|png|gif|webp|bmp|avif|heic|heif)$/i;
+
 export const readImage = (
   file: File | null | undefined,
   { max = 800, square = false, quality = 0.85 }: { max?: number; square?: boolean; quality?: number } = {},
 ) =>
   new Promise<string>((resolve, reject) => {
-    if (!file || !file.type.startsWith('image/')) {
+    // У некоторых файлов (особенно с телефона) тип пустой — тогда смотрим на расширение
+    if (!file || !(file.type.startsWith('image/') || (!file.type && IMAGE_EXT.test(file.name)))) {
       reject(new Error('Выберите изображение в формате JPG, PNG или GIF'));
       return;
     }
+    const heic = /hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
@@ -45,7 +61,13 @@ export const readImage = (
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(new Error('Не удалось прочитать изображение'));
+      reject(
+        new Error(
+          heic
+            ? 'Этот браузер не открывает фото в формате HEIC. Сохраните фото как JPG или загрузите его с телефона'
+            : 'Не удалось прочитать изображение',
+        ),
+      );
     };
     img.src = url;
   });

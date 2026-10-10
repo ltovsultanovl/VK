@@ -3,7 +3,7 @@
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "./lib/supabase";
 import { emptyProfileInfo } from "./data";
-import { readImage } from "./utils";
+import { dataUrlToBlob, readImage } from "./utils";
 import type {
   Album,
   AlbumPrivacy,
@@ -347,7 +347,7 @@ const BUCKET = "media";
 
 // dataURL (после сжатия в readImage) → файл в папке пользователя → публичная ссылка
 export const uploadImage = async (userId: string, dataUrl: string, folder: string) => {
-  const blob = await (await fetch(dataUrl)).blob();
+  const blob = dataUrlToBlob(dataUrl);
   const path = `${userId}/${folder}/${crypto.randomUUID()}.jpg`;
   unwrap(
     await supabase.storage.from(BUCKET).upload(path, blob, {
@@ -967,7 +967,7 @@ export const uploadChatFile = async (
     ext = "gif";
     type = "image";
   } else if (file.type.startsWith("image/")) {
-    blob = await (await fetch(await readImage(file, { max: 1600, quality: 0.85 }))).blob();
+    blob = dataUrlToBlob(await readImage(file, { max: 1600, quality: 0.85 }));
     ext = "jpg";
     type = "image";
   } else if (file.type.startsWith("video/")) {

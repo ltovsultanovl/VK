@@ -192,7 +192,7 @@ export default function SharedCard({ shared }: { shared: Shared }) {
       <Avatar name={fullName(profile)} color={profile.color} src={profile.avatar} size={48} />
       <span>
         <span className="shared__name">{fullName(profile)}</span>
-        <span className="shared__meta">{profile.contacts.city || "Страница ВКонтакте"}</span>
+        <span className="shared__meta">{profile.contacts.city || "Страница VYRON"}</span>
         <span className="shared__open">Открыть страницу</span>
       </span>
     </a>

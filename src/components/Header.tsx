@@ -1,3 +1,4 @@
+import Logo from "./Logo";
 import { useState } from "react";
 import MeAvatar from "./MeAvatar";
 import { ChevronDownIcon, BlockIcon, LogoutIcon, MoonIcon, SearchIcon } from "./Icons";
@@ -47,9 +48,8 @@ export default function Header({
   return (
     <header className="header">
       <div className="header__inner">
-        <a className="logo" href="#feed" onClick={go("feed")}>
-          <span className="logo__mark">VK</span>
-          <span className="logo__text">вконтакте</span>
+        <a className="logo" href="#feed" onClick={go("feed")} aria-label="VYRON — на главную">
+          <Logo />
         </a>
 
         {/* На узком телефоне поле не помещается — значок ведёт на страницу поиска людей */}

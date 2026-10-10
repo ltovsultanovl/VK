@@ -6,34 +6,34 @@
   --page-width: 1100px;
   --side-width: 250px;
   --profile-side-width: 300px;
-  --bg: #edeef0;
+  --bg: #f2f2f2;
   --card: #ffffff;
-  --text: #000000;
-  --text-secondary: #818c99;
-  --text-subhead: #6d7885;
-  --icon-secondary: #99a2ad;
-  --accent: #2688eb;
-  --accent-hover: #2d81e0;
-  --accent-alpha: rgba(38, 136, 235, 0.1);
-  --separator: #e7e8ec;
+  --text: #0a0a0a;
+  --text-secondary: #7d7d7d;
+  --text-subhead: #666666;
+  --icon-secondary: #9a9a9a;
+  --accent: #0a0a0a;
+  --accent-hover: #2b2b2b;
+  --accent-alpha: rgba(0, 0, 0, 0.07);
+  --separator: #e6e6e6;
   --card-border: rgba(0, 0, 0, 0.06);
-  --hover: rgba(0, 28, 61, 0.04);
-  --active: rgba(0, 28, 61, 0.07);
-  --field-bg: #f2f3f5;
+  --hover: rgba(0, 0, 0, 0.04);
+  --active: rgba(0, 0, 0, 0.07);
+  --field-bg: #f2f2f2;
   --field-border: rgba(0, 0, 0, 0.12);
-  --secondary-bg: rgba(0, 28, 61, 0.05);
-  --pill-bg: #f2f3f5;
+  --secondary-bg: rgba(0, 0, 0, 0.05);
+  --pill-bg: #f2f2f2;
   --like: #ff3347;
   --like-bg: rgba(255, 51, 71, 0.08);
   --online: #4bb34b;
   --header: #ffffff;
-  --im-bg: #edeef0;
+  --im-bg: #f2f2f2;
   --bubble-in: #ffffff;
-  --bubble-out: #cce4ff;
+  --bubble-out: #e4e4e4;
   --shadow-popup: 0 0 2px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.12);
 
-  --cover-empty: linear-gradient(180deg, #c5d0db, #e1e6ec);
-  --avatar-empty-bg: #dfe3e8;
+  --cover-empty: linear-gradient(180deg, #d4d4d4, #ececec);
+  --avatar-empty-bg: #e0e0e0;
   --avatar-empty-fg: #ffffff;
 
   --header-h: 48px;
@@ -44,35 +44,37 @@
   --header-total: calc(var(--header-h) + var(--safe-top));
   --nav-h: 56px;
   --radius: 12px;
+  --on-accent: #ffffff; /* текст и значки на акцентном фоне */
 }
 
 [data-theme="dark"] {
-  --bg: #141414;
-  --card: #222222;
-  --text: #e1e3e6;
-  --text-secondary: #76787a;
-  --text-subhead: #939393;
-  --icon-secondary: #76787a;
-  --accent: #71aaeb;
-  --accent-hover: #82b5ee;
-  --accent-alpha: rgba(113, 170, 235, 0.12);
-  --separator: #363738;
+  --bg: #0a0a0a;
+  --card: #161616;
+  --text: #ededed;
+  --text-secondary: #7a7a7a;
+  --text-subhead: #9a9a9a;
+  --icon-secondary: #7a7a7a;
+  --accent: #f2f2f2;
+  --accent-hover: #ffffff;
+  --accent-alpha: rgba(255, 255, 255, 0.1);
+  --separator: #2a2a2a;
   --card-border: rgba(255, 255, 255, 0.06);
   --hover: rgba(255, 255, 255, 0.04);
   --active: rgba(255, 255, 255, 0.08);
-  --field-bg: #2c2d2e;
+  --field-bg: #222222;
   --field-border: rgba(255, 255, 255, 0.12);
   --secondary-bg: rgba(255, 255, 255, 0.08);
-  --pill-bg: #2c2d2e;
+  --pill-bg: #222222;
   --like-bg: rgba(255, 51, 71, 0.14);
-  --header: #222222;
-  --im-bg: #141414;
-  --bubble-in: #2c2d2e;
-  --bubble-out: #2b4a6e;
+  --header: #161616;
+  --im-bg: #0a0a0a;
+  --bubble-in: #232323;
+  --bubble-out: #3a3a3a;
   --shadow-popup: 0 0 2px rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.5);
-  --cover-empty: linear-gradient(180deg, #050505, #121212);
-  --avatar-empty-bg: #3b3b3b;
-  --avatar-empty-fg: #5c5c5c;
+  --cover-empty: linear-gradient(180deg, #000000, #101010);
+  --avatar-empty-bg: #2e2e2e;
+  --avatar-empty-fg: #4f4f4f;
+  --on-accent: #0a0a0a;
 }
 
 /* =========================================================
@@ -194,7 +196,7 @@ textarea {
   border: 0;
   border-radius: 8px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 500;
   font-size: 13px;
   cursor: pointer;
@@ -291,22 +293,18 @@ textarea {
   gap: 8px;
   flex-shrink: 0;
 }
+.logo {
+  color: var(--text);
+  text-decoration: none;
+}
 .logo__mark {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: #0077ff;
-  color: #fff;
-  display: grid;
-  place-items: center;
-  font-weight: 800;
-  font-size: 13px;
-  letter-spacing: -0.5px;
+  display: block;
+  flex-shrink: 0;
 }
 .logo__text {
-  font-weight: 700;
+  font-weight: 800;
   font-size: 19px;
-  letter-spacing: 0.2px;
+  letter-spacing: 2.5px;
 }
 
 .search {
@@ -520,7 +518,7 @@ textarea {
 }
 .counter--accent {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .sidebar .separator {
   margin: 8px 6px;
@@ -652,7 +650,7 @@ textarea {
   height: 40px;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   display: grid;
   place-items: center;
 }
@@ -978,7 +976,7 @@ textarea {
   position: relative;
   border-radius: var(--radius) var(--radius) 0 0;
   height: 220px;
-  background: linear-gradient(120deg, #4a76a8, #7fb2e5 50%, #c3a6f0) center /
+  background: var(--cover-empty) center /
     cover no-repeat;
 }
 /* Панель с именем «наезжает» на обложку скруглёнными углами */
@@ -1243,7 +1241,7 @@ textarea {
   padding: 0 6px;
   border-radius: 10px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 12px;
   font-weight: 500;
   line-height: 20px;
@@ -1550,7 +1548,7 @@ textarea {
   border: 3px solid var(--card);
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   cursor: pointer;
   box-sizing: content-box;
   transition: background 0.15s;
@@ -2817,14 +2815,14 @@ textarea {
   align-items: center;
   gap: 10px;
 }
-.splash__logo .logo__mark {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  font-size: 17px;
+.splash__logo {
+  gap: 14px;
+  color: var(--text);
 }
 .splash__logo .logo__text {
-  font-size: 26px;
+  font-weight: 800;
+  font-size: 28px;
+  letter-spacing: 3.5px;
 }
 .splash__error {
   display: flex;
@@ -3176,7 +3174,7 @@ a.card__header--link[href]:hover {
   height: 40px;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .msg__audio-icon .chat-status__spinner {
   width: 18px;
@@ -3216,7 +3214,7 @@ a.card__header--link[href]:hover {
   height: 56px;
   border-radius: 8px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 /* Аватар профиля: клик открывает фото, у своего при наведении — действия внизу, как в VK */
@@ -3310,7 +3308,7 @@ a.card__header--link[href]:hover {
   border: 0;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   cursor: pointer;
 }
 .voice__play:disabled {
@@ -4208,6 +4206,7 @@ button.shared--state {
 .photo-grid__item--checked .photo-grid__check {
   border-color: var(--accent);
   background: var(--accent);
+  color: var(--on-accent);
 }
 
 .photos-selection {
@@ -4455,7 +4454,7 @@ button.shared--state {
   border: 0;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   cursor: pointer;
 }
 .player__play:hover {
@@ -5144,6 +5143,7 @@ button.shared--state {
 }
 .notif__badge--comment {
   background: var(--accent);
+  color: var(--on-accent);
 }
 .notif__badge--friend {
   background: #4bb34b;
@@ -5962,4 +5962,10 @@ textarea {
   .dialog-row--menu:has(.chat-menu--open) .dialog__time {
     visibility: visible;
   }
+}
+
+/* VYRON: в тёмной теме акцент белый — галочки на нём чёрные */
+[data-theme="dark"] .share__person--on .share__check,
+[data-theme="dark"] .checkbox input:checked + .checkbox__box {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230a0a0a' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 12 4 4 8-8'/%3E%3C/svg%3E");
 }

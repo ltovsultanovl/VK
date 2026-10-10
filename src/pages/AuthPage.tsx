@@ -133,7 +133,7 @@ function Login({ email, setEmail, go }: FormProps) {
   };
 
   return (
-    <Card title="Вход ВКонтакте" onSubmit={submit}>
+    <Card title="Вход в VYRON" onSubmit={submit}>
       <input
         className={`field ${error ? "field--invalid" : ""}`}
         type="email"

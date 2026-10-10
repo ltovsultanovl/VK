@@ -1,3 +1,4 @@
+import Logo from "./Logo";
 import type { ReactNode } from "react";
 
 // Заставка на весь экран: загрузка или ошибка с кнопкой «Повторить»
@@ -13,8 +14,7 @@ export default function Splash({
   return (
     <div className="splash">
       <div className="splash__logo">
-        <span className="logo__mark">VK</span>
-        <span className="logo__text">вконтакте</span>
+        <Logo height={34} />
       </div>
       {children ??
         (error ? (

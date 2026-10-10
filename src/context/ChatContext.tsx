@@ -26,7 +26,11 @@ import {
   deleteMessageForAll,
   deleteMessageForMe,
   explainError,
+  fetchChatSettings,
   fetchCommunityBrief,
+  saveChatSetting,
+  toChatSetting,
+  type ChatSetting,
   fetchMyCommunityMessages,
   markCommunityMessagesRead,
   sendCommunityMessage,
@@ -60,6 +64,11 @@ interface ChatValue {
   markRead: (peerId: string) => Promise<void>;
   sendTyping: (to: string) => void;
   retry: () => void;
+  // Меню «⋯» чата: закрепить, в архив, отметить непрочитанным
+  togglePin: (peer: string) => void;
+  toggleArchive: (peer: string) => void;
+  markUnread: (peer: string) => void;
+  clearMarkedUnread: (peer: string) => void;
 }
 
 const ChatContext = createContext<ChatValue | null>(null);
@@ -135,6 +144,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [typingIds, setTypingIds] = useState(() => new Set<string>());
   const [activePeerId, setActivePeerId] = useState<string | null>(null);
   const [fileUrls, setFileUrls] = useState<Record<string, string>>({}); // путь вложения → временная ссылка
+  const [settings, setSettings] = useState<Record<string, ChatSetting>>({}); // настройки чатов по собеседнику
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  });
   const requestedUrls = useRef(new Set<string>());
   const [attempt, setAttempt] = useState(0);
 
@@ -261,6 +275,28 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           });
         channels.push(presence);
         presenceRef.current = presence;
+
+        // Закреплённые, архив, «непрочитанные» — если таблицы ещё нет в базе, чат всё равно работает
+        try {
+          const list = await fetchChatSettings();
+          if (!cancelled) setSettings(Object.fromEntries(list.map((c) => [c.peer, c])));
+        } catch {
+          /* schema.sql ещё не обновлён */
+        }
+        channels.push(
+          supabase
+            .channel("chat-settings")
+            .on(
+              "postgres_changes",
+              { event: "*", schema: "public", table: "chat_settings", filter: `user_id=eq.${myId}` },
+              (payload) => {
+                if (payload.eventType === "DELETE") return;
+                const row = toChatSetting(payload.new as Parameters<typeof toChatSetting>[0]);
+                setSettings((map) => ({ ...map, [row.peer]: row }));
+              },
+            )
+            .subscribe(),
+        );
 
         setStatus("ready");
       } catch (e) {
@@ -470,8 +506,71 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
+  // ---------- Настройки чатов: сразу на экране, затем на сервер; при ошибке — назад ----------
+  const changeSetting = useCallback(
+    (peer: string, patch: Partial<ChatSetting>, success?: string) => {
+      const before = settingsRef.current[peer];
+      const base: ChatSetting = before ?? { peer, pinnedAt: null, archivedAt: null, markedUnread: false };
+      const next: ChatSetting = { ...base, ...patch };
+      setSettings((map) => ({ ...map, [peer]: next }));
+      saveChatSetting(myId, next).then(
+        () => success && showSnackbar(success),
+        (e) => {
+          setSettings((map) => {
+            const rest = { ...map };
+            if (before) rest[peer] = before;
+            else delete rest[peer];
+            return rest;
+          });
+          showSnackbar(explainError(e), "error");
+        },
+      );
+    },
+    [myId, showSnackbar],
+  );
+
+  const togglePin = useCallback(
+    (peer: string) => {
+      const pinned = !!settingsRef.current[peer]?.pinnedAt;
+      changeSetting(peer, { pinnedAt: pinned ? null : new Date().toISOString() }, pinned ? "Чат откреплён" : "Чат закреплён");
+    },
+    [changeSetting],
+  );
+
+  const toggleArchive = useCallback(
+    (peer: string) => {
+      const archived = !!settingsRef.current[peer]?.archivedAt;
+      // В архиве чат не закреплён — как в VK
+      changeSetting(
+        peer,
+        archived ? { archivedAt: null } : { archivedAt: new Date().toISOString(), pinnedAt: null },
+        archived ? "Чат возвращён из архива" : "Чат перенесён в архив",
+      );
+    },
+    [changeSetting],
+  );
+
+  const markUnread = useCallback(
+    (peer: string) => changeSetting(peer, { markedUnread: true }, "Чат отмечен непрочитанным"),
+    [changeSetting],
+  );
+
+  const clearMarkedUnread = useCallback(
+    (peer: string) => {
+      if (settingsRef.current[peer]?.markedUnread) changeSetting(peer, { markedUnread: false });
+    },
+    [changeSetting],
+  );
+
   // ---------- Диалоги: друзья + все, с кем есть переписка ----------
   const dialogs = useMemo<Dialog[]>(() => {
+    // Архив: новое входящее сообщение после переноса в архив возвращает чат в общий список
+    const flags = (peer: string, thread: MessageRow[]) => {
+      const c = settings[peer];
+      const lastIncoming = [...thread].reverse().find((m) => m.recipient_id === myId);
+      const archived = !!c?.archivedAt && !(lastIncoming && lastIncoming.created_at > c.archivedAt);
+      return { pinned: !!c?.pinnedAt && !archived, archived, markedUnread: !!c?.markedUnread };
+    };
     const contacts = new Map<string, Person>(Object.entries(people));
     friends.forEach((f) => contacts.set(f.id, f));
 
@@ -490,6 +589,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           last: thread.at(-1) ?? null,
           unread: thread.filter((m) => m.recipient_id === myId && !m.read_at).length,
           typing: typingIds.has(person.id),
+          ...flags(person.id, thread),
         };
       })
       // Переписки с сообществами — в общем списке, как в VK. Сообщения приводим к общему виду:
@@ -523,17 +623,24 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             unread: thread.filter((m) => m.recipient_id === myId && !m.read_at).length,
             typing: false,
             isCommunity: true,
+            ...flags(peer, thread),
           };
         }),
       )
       .sort((a, b) => {
+        // Закреплённые — сверху, последний закреплённый первым
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        if (a.pinned && b.pinned) {
+          return (settings[b.person.id]?.pinnedAt ?? "").localeCompare(settings[a.person.id]?.pinnedAt ?? "");
+        }
         if (a.last && b.last) return byTime(b.last, a.last);
         if (a.last || b.last) return a.last ? -1 : 1;
         return Number(b.person.online) - Number(a.person.online);
       });
-  }, [people, friends, messages, myId, onlineIds, typingIds, clubs, clubMessages]);
+  }, [people, friends, messages, myId, onlineIds, typingIds, clubs, clubMessages, settings]);
 
-  const unreadTotal = dialogs.reduce((sum, d) => sum + d.unread, 0);
+  // Отмеченный «непрочитанным» чат без новых сообщений считается за один
+  const unreadTotal = dialogs.reduce((sum, d) => sum + (d.unread || (d.markedUnread ? 1 : 0)), 0);
 
   const value = useMemo<ChatValue>(
     () => ({
@@ -554,8 +661,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       markRead,
       sendTyping,
       retry,
+      togglePin,
+      toggleArchive,
+      markUnread,
+      clearMarkedUnread,
     }),
-    [status, error, myId, dialogs, fileUrls, unreadTotal, onlineIds, activePeerId, openChat, openCommunityChat, sendMessage, retryMessage, deleteMessage, markRead, sendTyping, retry],
+    [status, error, myId, dialogs, fileUrls, unreadTotal, onlineIds, activePeerId, openChat, openCommunityChat, sendMessage, retryMessage, deleteMessage, markRead, sendTyping, retry, togglePin, toggleArchive, markUnread, clearMarkedUnread],
   );
 
   const actions = useMemo<ChatActions>(

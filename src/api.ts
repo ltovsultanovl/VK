@@ -182,7 +182,7 @@ export const explainError = (error: unknown): string => {
   if (/invalid login credentials/i.test(text)) return "Неверная почта или пароль";
   if (/already registered|already been registered|user_already_exists/i.test(text)) return "Эта почта уже зарегистрирована — войдите или восстановите пароль";
   if (/email not confirmed/i.test(text)) return "Почта не подтверждена. Откройте ссылку из письма, которое пришло при регистрации";
-  if (/password.*(at least|characters)|weak.?password/i.test(text)) return "Пароль слишком простой: минимум 6 символов";
+  if (/password.*(at least|characters)|weak.?password/i.test(text)) return "Пароль слишком простой: минимум 8 символов, не из списка утёкших";
   if (/same.*password|different from the old/i.test(text)) return "Новый пароль должен отличаться от старого";
   if (/expired|invalid.*(token|otp)|token.*invalid/i.test(text)) return "Код неверный или устарел. Запросите новый";
   if (/find_profile_by_email/i.test(text)) return "Поиск по почте ещё не включён: выполните обновлённый supabase/schema.sql в SQL Editor";
@@ -1374,3 +1374,46 @@ export const markNotificationsRead = async (myId: string) =>
 
 export const deleteNotification = async (id: number) =>
   unwrap(await supabase.from("notifications").delete().eq("id", id));
+
+// ---------- Настройки чатов: закреплён, архив, «непрочитанный» ----------
+
+export interface ChatSetting {
+  peer: string;
+  pinnedAt: string | null;
+  archivedAt: string | null;
+  markedUnread: boolean;
+}
+
+interface ChatSettingRow {
+  peer: string;
+  pinned_at: string | null;
+  archived_at: string | null;
+  marked_unread: boolean;
+}
+
+export const toChatSetting = (r: ChatSettingRow): ChatSetting => ({
+  peer: r.peer,
+  pinnedAt: r.pinned_at,
+  archivedAt: r.archived_at,
+  markedUnread: r.marked_unread,
+});
+
+export const fetchChatSettings = async () =>
+  unwrap<ChatSettingRow[]>(await supabase.from("chat_settings").select("peer, pinned_at, archived_at, marked_unread")).map(
+    toChatSetting,
+  );
+
+export const saveChatSetting = async (myId: string, setting: ChatSetting) =>
+  unwrap(
+    await supabase.from("chat_settings").upsert(
+      {
+        user_id: myId,
+        peer: setting.peer,
+        pinned_at: setting.pinnedAt,
+        archived_at: setting.archivedAt,
+        marked_unread: setting.markedUnread,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id,peer" },
+    ),
+  );

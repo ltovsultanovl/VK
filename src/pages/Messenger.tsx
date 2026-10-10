@@ -16,8 +16,13 @@ import {
 } from "../hooks";
 import { MAX_FILE_MB, attachmentKind } from "../api";
 import {
+  ArchiveIcon,
   AttachIcon,
+  ChevronDownIcon,
   ChevronLeftIcon,
+  ChevronUpIcon,
+  PinIcon,
+  UnreadIcon,
   CamcorderIcon,
   CloseIcon,
   CopyIcon,
@@ -33,7 +38,24 @@ import {
   WriteIcon,
 } from "../components/Icons";
 
-const folders = ["Все", "Непрочитанные", "Личные"];
+type Folder = "Все" | "Непрочитанные" | "Личные" | "Архив";
+
+// Подсветка найденного текста в сообщении
+function Highlighted({ text, query }: { text: string; query: string }) {
+  if (!query) return <>{text}</>;
+  const lower = text.toLowerCase();
+  const q = query.toLowerCase();
+  const parts: React.ReactNode[] = [];
+  let from = 0;
+  for (let i = lower.indexOf(q); i !== -1; i = lower.indexOf(q, i + q.length)) {
+    parts.push(text.slice(from, i), <mark key={i} className="msg__mark">{text.slice(i, i + q.length)}</mark>);
+    from = i + q.length;
+  }
+  parts.push(text.slice(from));
+  return <>{parts}</>;
+}
+
+const matchesQuery = (text: string | undefined, q: string) => !!text && !!q && text.toLowerCase().includes(q.toLowerCase());
 
 // ---------- Данные для окна мессенджера (уже в виде для показа) ----------
 export type MessageState = "pending" | "sent" | "read" | "failed";
@@ -65,6 +87,9 @@ export interface ViewDialog<R = unknown> {
   id: string;
   person: ChatPeer;
   textOnly?: boolean;
+  pinned?: boolean;
+  archived?: boolean;
+  markedUnread?: boolean;
   unread: number;
   typing?: boolean;
   time: string;
@@ -451,8 +476,12 @@ const MessageItem = memo(function MessageItem({
   onZoom,
   onAskDelete,
   onRetry,
+  highlight = "",
+  current = false,
 }: {
   message: ViewMessage<unknown>;
+  highlight?: string; // что подсветить (поиск по чату)
+  current?: boolean; // это совпадение сейчас выбрано
   day: string | null;
   deletable: boolean;
   onZoom: (url: string) => void;
@@ -460,14 +489,18 @@ const MessageItem = memo(function MessageItem({
   onRetry: (message: ViewMessage<unknown>) => void;
 }) {
   return (
-    <div className="chat__item">
+    <div className={`chat__item ${current ? "chat__item--current" : ""}`} data-msg-id={m.id}>
       {day && <div className="chat__day">{day}</div>}
       <div className={`msg-line ${m.out ? "msg-line--out" : ""}`}>
         <div
           className={`msg ${m.out ? "msg--out" : ""} ${m.state === "failed" ? "msg--failed" : ""} ${m.attachment || m.shared ? "msg--with-media" : ""}`}
         >
           {m.attachment && <Attachment attachment={m.attachment} pending={m.state === "pending"} onOpen={onZoom} />}
-          {m.text && <span className="msg__text">{m.text}</span>}
+          {m.text && (
+            <span className="msg__text">
+              <Highlighted text={m.text} query={highlight} />
+            </span>
+          )}
           {m.shared && <SharedCard shared={m.shared} />}
           <span className="msg__time">
             {m.time}
@@ -487,6 +520,66 @@ const MessageItem = memo(function MessageItem({
   );
 });
 
+// «⋯» в шапке чата: закрепить, отметить непрочитанным, архив
+export interface ChatMenuActions {
+  togglePin: (id: string) => void;
+  toggleArchive: (id: string) => void;
+  markUnread: (id: string) => void;
+}
+
+function ChatMenu({
+  dialog,
+  actions,
+  onSearch,
+  onLeave,
+}: {
+  dialog: ViewDialog<unknown>;
+  actions?: ChatMenuActions;
+  onSearch: () => void;
+  onLeave: () => void; // на телефоне после «непрочитанным» / «в архив» возвращаемся к списку
+}) {
+  const menu = useDropdown();
+  const item = (label: string, Icon: typeof PinIcon, run: () => void) => (
+    <button
+      className="dropdown__item"
+      onClick={() => {
+        menu.close();
+        run();
+      }}
+    >
+      <Icon size={20} /> {label}
+    </button>
+  );
+  return (
+    <div className="chat-menu" ref={menu.ref}>
+      <button className="icon-btn" title="Ещё" onClick={menu.toggle}>
+        <MoreIcon size={22} />
+      </button>
+      {menu.open && (
+        <div className="dropdown dropdown--right chat-menu__dropdown">
+          {item("Поиск по сообщениям", SearchIcon, onSearch)}
+          {actions && (
+            <>
+              {!dialog.archived &&
+                item(dialog.pinned ? "Открепить чат" : "Закрепить чат", PinIcon, () => actions.togglePin(dialog.id))}
+              {!dialog.markedUnread &&
+                dialog.unread === 0 &&
+                item("Отметить непрочитанным", UnreadIcon, () => {
+                  actions.markUnread(dialog.id);
+                  onLeave();
+                })}
+              {item(dialog.archived ? "Вернуть из архива" : "Архивировать чат", ArchiveIcon, () => {
+                actions.toggleArchive(dialog.id);
+                if (!dialog.archived) onLeave();
+              })}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Окно мессенджера.
 // dialog: { id, person: { name, color, avatar?, online }, unread, time, typing?,
 //           messages: [{ id, out, text, summary?, attachment?: { type, url, name? }, time, day?,
@@ -502,6 +595,7 @@ export default function Messenger<R>({
   onDelete,
   emptyText = "Здесь пока нет чатов",
   startInChat = false,
+  chatActions,
 }: {
   dialogs: ViewDialog<R>[];
   activeId: string | undefined;
@@ -514,6 +608,7 @@ export default function Messenger<R>({
   // На телефоне видно что-то одно: список чатов или открытый чат. true — сразу чат
   // (пришли по «Написать сообщение» со страницы человека)
   startInChat?: boolean;
+  chatActions?: ChatMenuActions;
 }) {
   const [chatOpen, setChatOpen] = useState(startInChat);
   // Колбэки для сообщений — постоянные, чтобы мемоизированные сообщения не перерисовывались
@@ -525,7 +620,9 @@ export default function Messenger<R>({
   const askDelete = useCallback((m: ViewMessage<unknown>) => setToDelete(m as ViewMessage<R>), []);
   const [toDelete, setToDelete] = useState<ViewMessage<R> | null>(null); // сообщение, для которого открыто «Удалить?»
   const [text, setText] = useState("");
-  const [folder, setFolder] = useState(folders[0]);
+  const [folder, setFolder] = useState<Folder>("Все");
+  // Поиск по открытому чату: запрос и выбранное совпадение
+  const [search, setSearch] = useState<{ q: string; currentId: number | string | null } | null>(null);
   const [query, setQuery] = useState("");
   // Выбранное, ещё не отправленное вложение
   const [attachment, setAttachment] = useState<{ file: File; url: string; type: AttachmentType } | null>(null);
@@ -540,11 +637,54 @@ export default function Messenger<R>({
     if (el) el.scrollTop = el.scrollHeight;
   }, [active?.messages.length, active?.id, active?.typing]);
 
-  const visible = dialogs.filter(
-    (d) =>
-      (folder !== "Непрочитанные" || d.unread > 0) &&
-      d.person.name.toLowerCase().includes(query.toLowerCase()),
-  );
+  const archivedCount = dialogs.filter((d) => d.archived).length;
+  const folders: Folder[] = archivedCount ? ["Все", "Непрочитанные", "Личные", "Архив"] : ["Все", "Непрочитанные", "Личные"];
+  const inFolder = (d: ViewDialog<R>) =>
+    folder === "Архив"
+      ? d.archived
+      : !d.archived &&
+        (folder !== "Непрочитанные" || d.unread > 0 || !!d.markedUnread) &&
+        (folder !== "Личные" || !d.person.isCommunity);
+  const q = query.trim();
+  const visible = dialogs.filter((d) => inFolder(d) && d.person.name.toLowerCase().includes(q.toLowerCase()));
+  // Поиск в списке находит и сами сообщения во всех переписках (новые сверху)
+  const messageHits =
+    q.length >= 2
+      ? dialogs
+          .flatMap((d) => d.messages.filter((m) => matchesQuery(m.text, q)).map((m) => ({ dialog: d, message: m })))
+          .reverse()
+          .slice(0, 50)
+      : [];
+
+  // Совпадения в открытом чате; выбранное — по id (стрелки ↑ ↓ ходят по ним)
+  const chatMatches = search?.q ? (active?.messages ?? []).filter((m) => matchesQuery(m.text, search.q)) : [];
+  const currentIndex = chatMatches.findIndex((m) => m.id === search?.currentId);
+  const step = (dir: -1 | 1) => {
+    if (!chatMatches.length) return;
+    const from = currentIndex === -1 ? chatMatches.length : currentIndex;
+    const next = chatMatches[(from + dir + chatMatches.length) % chatMatches.length];
+    setSearch((st) => (st ? { ...st, currentId: next.id } : st));
+  };
+
+  // Сменился открытый чат — поиск закрываем (кроме перехода из результатов поиска)
+  const [searchChat, setSearchChat] = useState(active?.id);
+  if (searchChat !== active?.id) {
+    setSearchChat(active?.id);
+    if (search && !search.currentId) setSearch(null);
+  }
+
+  // Выбранное совпадение — по центру экрана
+  useEffect(() => {
+    if (!search?.currentId) return;
+    const el = bodyRef.current?.querySelector(`[data-msg-id="${CSS.escape(String(search.currentId))}"]`);
+    el?.scrollIntoView({ block: "center" });
+  }, [search?.currentId, active?.id]);
+
+  const openFromSearch = (dialogId: string, messageId: number | string) => {
+    onOpen(dialogId);
+    setChatOpen(true);
+    setSearch({ q, currentId: messageId });
+  };
 
   // Выбрали файл (кнопкой, перетаскиванием или вставкой) — проверяем и показываем превью
   const choose = (file: File | undefined) => {
@@ -698,6 +838,7 @@ export default function Messenger<R>({
               onClick={() => setFolder(f)}
             >
               {f}
+              {f === "Архив" && <span className="muted"> {archivedCount}</span>}
             </button>
           ))}
         </div>
@@ -709,7 +850,7 @@ export default function Messenger<R>({
               <button
                 key={d.id}
                 type="button"
-                className={`dialog ${d.id === active?.id ? "active" : ""}`}
+                className={`dialog ${d.id === active?.id ? "active" : ""} ${d.pinned ? "dialog--pinned" : ""}`}
                 onClick={() => {
                   onOpen(d.id);
                   setChatOpen(true);
@@ -748,18 +889,44 @@ export default function Messenger<R>({
                         "Нет сообщений"
                       )}
                     </span>
-                    {d.unread > 0 && (
+                    {d.unread > 0 ? (
                       <span className="dialog__unread">{d.unread}</span>
-                    )}
+                    ) : d.markedUnread ? (
+                      <span className="dialog__unread dialog__unread--dot" title="Отмечен непрочитанным" />
+                    ) : d.pinned ? (
+                      <PinIcon size={16} className="dialog__pin" />
+                    ) : null}
                   </span>
                 </span>
               </button>
             );
           })}
-          {visible.length === 0 && (
+          {visible.length === 0 && messageHits.length === 0 && (
             <div className="empty">
-              {dialogs.length ? "Ничего не найдено" : emptyText}
+              {dialogs.length ? (q ? "Ничего не найдено" : "В этой папке пока пусто") : emptyText}
             </div>
+          )}
+          {messageHits.length > 0 && (
+            <>
+              <div className="im-list__section">Сообщения</div>
+              {messageHits.map(({ dialog: d, message: m }) => (
+                <button key={`${d.id}:${m.id}`} type="button" className="dialog" onClick={() => openFromSearch(d.id, m.id)}>
+                  <Avatar name={d.person.name} color={d.person.color} src={d.person.avatar} empty={!d.person.isCommunity} size={48} />
+                  <span className="dialog__body">
+                    <span className="dialog__top">
+                      <span className="dialog__name">{d.person.name}</span>
+                      <span className="dialog__time">{m.day === "Сегодня" ? m.time : m.day}</span>
+                    </span>
+                    <span className="dialog__bottom">
+                      <span className="dialog__last">
+                        {m.out && <b>Вы: </b>}
+                        <Highlighted text={m.text} query={q} />
+                      </span>
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </>
           )}
         </div>
       </div>
@@ -805,13 +972,55 @@ export default function Messenger<R>({
                       : "был(а) недавно"}
               </div>
             </div>
-            <button className="icon-btn" title="Поиск по чату">
+            <button className="icon-btn" title="Поиск по сообщениям" onClick={() => setSearch({ q: "", currentId: null })}>
               <SearchIcon size={22} />
             </button>
-            <button className="icon-btn" title="Ещё">
-              <MoreIcon size={22} />
-            </button>
+            <ChatMenu
+              dialog={active}
+              actions={chatActions}
+              onSearch={() => setSearch({ q: "", currentId: null })}
+              onLeave={() => setChatOpen(false)}
+            />
           </div>
+
+          {/* ---------- Поиск по сообщениям этого чата ---------- */}
+          {search && (
+            <form
+              className="chat-search"
+              role="search"
+              onSubmit={(e) => {
+                e.preventDefault();
+                step(-1); // Enter — к предыдущему (более старому) совпадению
+              }}
+            >
+              <SearchIcon size={18} />
+              <input
+                autoFocus
+                type="search"
+                placeholder="Поиск по сообщениям"
+                value={search.q}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  const found = (active.messages ?? []).filter((m) => matchesQuery(m.text, value.trim()));
+                  // Сразу встаём на самое новое совпадение
+                  setSearch({ q: value.trim(), currentId: found.at(-1)?.id ?? null });
+                }}
+                onKeyDown={(e) => e.key === "Escape" && setSearch(null)}
+              />
+              <span className="chat-search__count">
+                {search.q ? (chatMatches.length ? `${currentIndex + 1} из ${chatMatches.length}` : "Не найдено") : ""}
+              </span>
+              <button type="button" className="icon-btn icon-btn--sm" title="Раньше" disabled={!chatMatches.length} onClick={() => step(-1)}>
+                <ChevronUpIcon size={20} />
+              </button>
+              <button type="button" className="icon-btn icon-btn--sm" title="Позже" disabled={!chatMatches.length} onClick={() => step(1)}>
+                <ChevronDownIcon size={20} />
+              </button>
+              <button type="button" className="icon-btn icon-btn--sm" title="Закрыть поиск" onClick={() => setSearch(null)}>
+                <CloseIcon size={18} />
+              </button>
+            </form>
+          )}
 
           <div className="chat__body" ref={bodyRef}>
             {active.messages.length > 0 ? (
@@ -828,6 +1037,8 @@ export default function Messenger<R>({
                     onZoom={setZoomUrl}
                     onAskDelete={askDelete}
                     onRetry={retry}
+                    highlight={search?.q && matchesQuery(m.text, search.q) ? search.q : ""}
+                    current={m.id === search?.currentId}
                   />
                 );
               })

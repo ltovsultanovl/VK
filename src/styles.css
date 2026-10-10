@@ -5725,3 +5725,93 @@ textarea {
     max-height: 100dvh;
   }
 }
+
+/* =========================================================
+   Мессенджер: поиск по сообщениям, закреплённые, архив, «непрочитано»
+   ========================================================= */
+.im-folders {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.im-folders::-webkit-scrollbar {
+  display: none;
+}
+.im-folders .seg {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.im-list__section {
+  padding: 12px 10px 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+.dialog__pin {
+  flex-shrink: 0;
+  color: var(--icon-secondary);
+}
+.dialog__unread--dot {
+  min-width: 12px;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+}
+.dialog--pinned:not(.active) {
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.chat-menu {
+  position: relative;
+}
+.chat-menu__dropdown {
+  top: calc(100% + 4px);
+  z-index: 20;
+  width: 250px;
+}
+.chat-menu__dropdown .dropdown__item svg {
+  color: var(--accent);
+}
+
+/* Строка поиска под шапкой чата */
+.chat-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 8px 16px;
+  border-bottom: 1px solid var(--separator);
+  background: var(--card);
+  color: var(--icon-secondary);
+}
+.chat-search input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.chat-search input::-webkit-search-cancel-button {
+  display: none;
+}
+.chat-search__count {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.msg__mark {
+  border-radius: 3px;
+  background: #ffd84a;
+  color: #000;
+}
+.chat__item--current .msg {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+@media (max-width: 760px) {
+  .chat-search input {
+    font-size: 16px; /* без автозума на iPhone */
+  }
+}

@@ -1776,3 +1776,54 @@ begin
     );
   end loop;
 end $$;
+
+-- =========================================================
+-- Настройки чатов у каждого человека: закреплён, в архиве, отмечен непрочитанным.
+-- peer — собеседник: id человека или "club:<id>" для переписки с сообществом
+-- =========================================================
+create table if not exists public.chat_settings (
+  user_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  peer text not null check (char_length(peer) between 1 and 64),
+  pinned_at timestamptz,     -- закреплён (порядок закреплённых — по времени)
+  archived_at timestamptz,   -- в архиве; новое сообщение после этой даты возвращает чат в список
+  marked_unread boolean not null default false,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, peer)
+);
+
+alter table public.chat_settings enable row level security;
+
+drop policy if exists "Свои настройки чатов" on public.chat_settings;
+create policy "Свои настройки чатов" on public.chat_settings
+  for all to authenticated
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+-- Закреплённых чатов — не больше 5, как в VK
+create or replace function public.chat_pins_limit()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if new.pinned_at is not null and (tg_op = 'INSERT' or old.pinned_at is null) and (
+    select count(*) from public.chat_settings
+    where user_id = new.user_id and pinned_at is not null and peer <> new.peer
+  ) >= 5 then
+    raise exception 'Можно закрепить не больше 5 чатов' using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
+revoke execute on function public.chat_pins_limit() from public, anon, authenticated;
+
+drop trigger if exists chat_settings_pins_limit on public.chat_settings;
+create trigger chat_settings_pins_limit before insert or update on public.chat_settings
+  for each row execute function public.chat_pins_limit();
+
+-- Синхронизация между устройствами
+do $$
+begin
+  alter publication supabase_realtime add table public.chat_settings;
+exception when duplicate_object then null;
+end $$;

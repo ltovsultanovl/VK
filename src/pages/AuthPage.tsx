@@ -10,7 +10,7 @@ import {
 } from "../api";
 
 const RESEND_SECONDS = 60;
-const MIN_PASSWORD = 6;
+const MIN_PASSWORD = 8; // как в настройках Supabase (Authentication → Password)
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type Mode = "login" | "register" | "reset" | "link";

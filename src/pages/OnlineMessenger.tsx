@@ -30,7 +30,12 @@ export default function OnlineMessenger() {
     markRead,
     sendTyping,
     retry,
+    togglePin,
+    toggleArchive,
+    markUnread,
+    clearMarkedUnread,
   } = useChat();
+  const chatActions = useMemo(() => ({ togglePin, toggleArchive, markUnread }), [togglePin, toggleArchive, markUnread]);
 
   // Готовые сообщения кешируем по исходной строке: если строка та же, отдаём тот же объект —
   // тогда «печатает…», «в сети» и новые сообщения не перерисовывают уже показанные
@@ -43,6 +48,9 @@ export default function OnlineMessenger() {
         id: d.person.id,
         person: d.person,
         textOnly: !!d.isCommunity, // сообществу пишут только текстом
+        pinned: d.pinned,
+        archived: d.archived,
+        markedUnread: d.markedUnread,
         unread: d.unread,
         typing: d.typing,
         time: formatDialogTime(d.last?.created_at),
@@ -125,8 +133,15 @@ export default function OnlineMessenger() {
     <Messenger
       dialogs={view}
       activeId={active?.id}
-      onOpen={setActivePeerId}
-      onSend={(id, text, file, voice) => sendMessage(id, { text, file, voice })}
+      onOpen={(id) => {
+        setActivePeerId(id);
+        clearMarkedUnread(id); // открыли чат — отметка «непрочитано» больше не нужна
+      }}
+      onSend={(id, text, file, voice) => {
+        clearMarkedUnread(id);
+        sendMessage(id, { text, file, voice });
+      }}
+      chatActions={chatActions}
       onTyping={sendTyping}
       onRetry={(m) => retryMessage(m.raw)}
       onDelete={(m, forAll) => deleteMessage(m.raw, { forAll })}

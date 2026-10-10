@@ -334,6 +334,9 @@ export interface Dialog {
   unread: number;
   typing: boolean;
   isCommunity?: boolean;
+  pinned: boolean;
+  archived: boolean;
+  markedUnread: boolean;
 }
 
 export interface SendOptions {

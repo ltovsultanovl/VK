@@ -547,3 +547,23 @@ export const PlaylistIcon = (p: IconProps) => (
     <circle cx="15.2" cy="19.4" r="1.9" />
   </Svg>
 );
+
+export const ChevronUpIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m7 14 5-5 5 5" />
+  </Svg>
+);
+
+export const ArchiveIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3.5" y="4.5" width="17" height="4" rx="1" />
+    <path d="M5 8.5V18a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 18V8.5M10 12.5h4" />
+  </Svg>
+);
+
+export const UnreadIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M20 12.5V17a2 2 0 0 1-2 2H8l-4 3V7a2 2 0 0 1 2-2h7.5" />
+    <circle cx="18.5" cy="5.5" r="2.5" fill="currentColor" stroke="none" />
+  </Svg>
+);
